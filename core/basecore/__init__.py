@@ -29,9 +29,9 @@ class FileBrowser(context.Context):
         match id:
             case 'Please input a path: ':
                 # [i] it must pass all the path tests
-                if test_path(value):
-                    
-        
+                if not test_path(value):
+                    self._VALUE = "{Back.RED}The path you inserted is invalid!!!{Back.RESET}" + '\n'.join(self._VALUE.split('\n')[1:])
+
         return super().handle_value(id, value)
     
     def handle_hierarchy(self)
