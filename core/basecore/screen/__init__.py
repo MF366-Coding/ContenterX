@@ -16,31 +16,64 @@ class Screen:
         handled_value: tuple[str, Any] = self._CONTEXT.handle_value(id, value)
         self._globals[str(handled_value[0])] = handled_value[1]
     
-    def refresh(self):
+    def newline(self, count: int = 1) -> None:
+        self.write('\n' * count)
+
+    def write(self, __s: str, __stdout: bool = True) -> int | Any:
+        __outputter = sys.stdout
+
+        if not __stdout:
+            __outputter = sys.stderr
+        
+        return __outputter.write(__s)
+
+    def writelines(self, __iterable: list[str], __stdout: bool = True):
+        __outputter = sys.stdout
+
+        if not __stdout:
+            __outputter = sys.stderr
+
+        __outputter.writelines(__iterable)
+        
+    def clear_screen(self):
         self._formatter.clear_viewport()
+
+    def change_context(self, new_context):
+        self._cur_context = new_context
+        self.clear_screen()
+
+        self.write(self._cur_context.format())
         self._formatter.set_viewport_title(self._TITLE)
-        sys.stdout.write(self._CONTEXT.format())
+        self.read_input()
+    
+    def read_input(self):
+        self.write(f"\n{'.' * 50}\n")
         
         key = keyboard.read_key()
         
+        if key == 'shift':
+            value = input('An input is required: ')
+            handled_input = self._CONTEXT.handle_input(value)
+            
+            if isinstance(handled_input, str):
+                self._CONTEXT.edit(handled_input)
+                
+            else:
+                self.change_context(handled_input)
+                
+            return
+        
         if key not in self._CONTEXT.events:
-            key = '#DEFAULT#'
+            self.clear_screen()
+            self.write(f"{self._formatter.Fore.RED}Invalid Key Input!!{self._COLORMAP['RESET_ALL']}\n\n{str(self._cur_context)}")
+            self.read_input()
+            return
+
+        event = self._CONTEXT.handle_key_press(key)
         
-        what_to_run: list[str] = self._CONTEXT.events[key]
-        
-        for i in what_to_run:
-            # [*] Case I: 'i' represents a Screen indication
-            if i.startswith('#') and i.endswith('#'):
-                if i.startswith("#GET_INPUT:::"):
-                    input_val = input(i[13:-1])
-                    self.send_value(i[13:-1], input_val)
-                          
-                match i:
-                    case '#FORCEQUIT#':
-                        sys.exit()
-                        
-                    case _:
-                        pass
-                        
-            # [*] Case II: 'i' is a Callable
-            i()
+        if isinstance(event, str):
+            self._CONTEXT.edit(event)
+            
+        else:
+            self.change_context(event)
+
