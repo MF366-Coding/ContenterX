@@ -28,6 +28,7 @@ def test_path(path: str, supposed_file: bool = False) -> bool:
 class FileBrowser(context.Context):
     def __init__(self, screen, quick_access_items: tuple[str] | None = None, keyword_formatters = None, title = None):
         self._selection = 0
+        self._cur_dir = os.getcwd()
         
         if not quick_access_items:
             quick_access_items = (os.path.expanduser('~'), os.path.expanduser('~'))
@@ -36,17 +37,43 @@ class FileBrowser(context.Context):
         self._quick_access_field = ["╔==========================╗", "║                          ║", "╠====== Quick Access ======╣", "║                          ║"]
         self._file_browser_field = ["╔==================================================================╗", "║                                                                  ║", "╠========================== File Browser ==========================╣", "║                                                                  ║"]
         self._details_field = None # TODO
-        
-        spam = os.listdir(os.getcwd())
-    
-        self._cur_dir_content_separated: list[list[str | int], list[str | int]] = [['..'] + [i if os.path.isdir(i) else 4 for i in spam], [i if os.path.isfile(i) else 4 for i in spam]]
-        self._cur_dir_content = self._cur_dir_content_separated[0] + self._cur_dir_content_separated[1]
+
+        self._cur_dir_content = ['..'] + os.listdir(self._cur_dir)
         
         for _ in range(self._cur_dir_content.count(4)):
             self._cur_dir_content.remove(4)
-            
-        del spam       
         
         value = None
         
         super().__init__(screen, value, keyword_formatters, title)
+        
+    def get_designation_based_on_element_type(self):
+        eggs = {'folder': [], 'file': [], "symlink": [], 'mountpoint': [], 'other': []}
+        
+        for i in self._cur_dir_content:
+            if i == '..':
+                eggs['folder'].append('..')
+                continue
+                
+            if os.path.isdir(i):
+                eggs['folder'].append(os.path.relpath(i))
+                continue
+            
+            if os.path.islink(i):
+                eggs['symlink'].append(os.path.relpath(i))
+                continue
+            
+            if os.path.ismount(i):
+                eggs['mountpoint'].append(os.path.relpath(i))
+                continue
+            
+            if os.path.isfile(i):
+                eggs['file'].append(os.path.relpath(i))
+                continue
+            
+            eggs['other'].append(os.path.relpath(i))
+                
+        return eggs
+    
+    def highlight_selection(self):
+        pass
