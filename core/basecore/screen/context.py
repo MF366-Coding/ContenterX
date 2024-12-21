@@ -13,8 +13,8 @@ class Context:
         
         self._FORMATTERS: dict[str, Any] = keyword_formatters
     
-    def handle_input(self, value: str):
-        return value
+    def handle_input(self, input_key: int, value: str):
+        return f"Value for input of ID #{input_key}: {value}" # [i] remember: 0 for shift, 1 for backslash or something like that
     
     def handle_keypress(self, key: keyboard._Key):
         return f"Key {key} pressed."
@@ -46,5 +46,7 @@ class Context:
         self._TITLE: str = value
 
     def __str__(self) -> str:
-        return self._VALUE # [i] no formatting is you do __str__
+        return self._VALUE # [i] no formatting if you do __str__
+                           # [i] if you want formatting, use the format method instead
+                        
  

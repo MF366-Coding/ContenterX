@@ -3,7 +3,9 @@ import os
 import sys
 import PIL
 from typing import Any
+from NCapybaraLib import String as string
 
+# [<] why the fuck is this up here?
 filebrowser_formatter = formatting.Formatter(True, {})
 
 
@@ -25,8 +27,53 @@ def test_path(path: str, supposed_file: bool = False) -> bool:
     return all((test1, test2, test3))
 
 
+def sort_files_by_criteria(list_of_paths: list[str], criteria: str = 'AZ'):
+    match criteria:
+        case 'ZA':
+            # Placeholder for sorting alphabetically Z-A
+            pass
+        
+        case 'time-up':
+            list_of_times = [os.path.getctime() for i in list_of_paths]
+        
+        case 'time-down':
+            # Placeholder for sorting by creation time descending
+            pass
+        case 'size-up':
+            # Placeholder for sorting by size ascending
+            pass
+        case 'size-down':
+            # Placeholder for sorting by size descending
+            pass
+        case 'tch-up':
+            # Placeholder for sorting by last change time ascending
+            pass
+        case 'tch-down':
+            # Placeholder for sorting by last change time descending
+            pass
+        case 'tac-up':
+            # Placeholder for sorting by last access time ascending
+            pass
+        case 'tac-down':
+            # Placeholder for sorting by last access time descending
+            pass
+        case _:
+            # Placeholder for default sorting (if criteria doesn't match any case)
+            pass
+
+
 class FileBrowser(context.Context):
     def __init__(self, screen, quick_access_items: tuple[str] | None = None, keyword_formatters = None, title = None):
+        self.SCREEN = screen
+                
+        self._rendering_method = 'list' # [i] can be "grid" or "list"
+        self._rendering_order = 'AZ' # [i] can be "AZ", "ZA", "time-up", "time-down", "size-up", "size-down", "tch-up", "tch-down", "tac-up", "tac-down"
+                                     # [i] "AZ" and "ZA" are for alphabetical order
+                                     # [i] "time-up" and "time-down" are for time of creation
+                                     # [i] "size-up" and "size-down" are for size of the file
+                                     # [i] "tch-up" and "tch-down" are for time of last change
+                                     # [i] "tac-up" and "tac-down" are for time of last access
+                                     # [<] now who the fuck thought these alias would be a good idea?
         self._selection = 0
         self._cur_dir = os.getcwd()
         
@@ -40,13 +87,27 @@ class FileBrowser(context.Context):
 
         self._cur_dir_content = ['..'] + os.listdir(self._cur_dir)
         
-        for _ in range(self._cur_dir_content.count(4)):
-            self._cur_dir_content.remove(4)
-        
         value = None
         
         super().__init__(screen, value, keyword_formatters, title)
+    
+    def get_file_browser_ready(self):
+        self._cur_dir_content = ['..'] + os.listdir(self._cur_dir)
+        designations = self.get_designation_based_on_element_type()
         
+        sorted_mountpoints = designations['mountpoint']
+        
+        
+        # [i] the order is gonna be: mountpoints, folders, <everything else ordered by self._rendering_order>
+        sorted_files_and_links = [j for j in designations[i] for i in ('file', 'symlink', 'other')]
+        
+        
+    
+    def get_quick_access_ready()
+    
+    def draw_to_screen(self):
+        self.SCREEN.writelines(self._lines)        
+    
     def get_designation_based_on_element_type(self):
         eggs = {'folder': [], 'file': [], "symlink": [], 'mountpoint': [], 'other': []}
         
@@ -76,4 +137,4 @@ class FileBrowser(context.Context):
         return eggs
     
     def highlight_selection(self):
-        pass
+        

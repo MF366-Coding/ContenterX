@@ -47,13 +47,22 @@ class Screen:
         self.read_input()
     
     def read_input(self):
+        spam = lambda: self.change_context(self._CONTEXT)
+        
         self.write(f"\n{'.' * 50}\n")
         
         key = keyboard.read_key()
+        input_keys = ('shift', chr(92))
         
-        if key == 'shift':
+        # [<] Update 1: i rlly like how this is turning out with the shift key for the input and all
+        # [<] Update 2: I just fucking realized I'm gonna need not just one, but
+        # [<]           TWO FUCKING KEYS THAT CALL THE INPUT METHOD
+        # [<]           so for short: fuck me and my miserable coding ass!       
+        if key in input_keys:
+            eggs = keyboard.on_press_key('esc', spam)
             value = input('An input is required: ')
-            handled_input = self._CONTEXT.handle_input(value)
+            handled_input = self._CONTEXT.handle_input(input_keys.index(key), value) # [i] 0 for SHIFT, 1 for BACKSLASH
+            keyboard.unhook_key(eggs)
             
             if isinstance(handled_input, str):
                 self._CONTEXT.edit(handled_input)
