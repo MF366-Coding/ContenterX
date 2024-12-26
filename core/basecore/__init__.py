@@ -1,5 +1,5 @@
 from screen import context, Screen
-from screen.formatting import *
+from screen.formatting import Formatter, set_effect, Effect, set_viewport_title, wipe_line, clear_viewport, change_cursor_visibility, Fore, Back, Cursor
 import os
 import sys
 import PIL
@@ -33,33 +33,33 @@ def test_path(path: str, supposed_file: bool = False, method_mode: int = 0) -> b
         1. Always True.
         2. Check if the path is a file (if supposed_file is True) or a directory (if supposed_file is False).
         3. Always True.
-    
+
     :param str path: the path of the directory or file to test
     :param bool supposed_file: to interpret this path as a file or a directory, defaults to False (interpret as a directory)
     :param int method_mode: the mode of the method to use for testing the path, defaults to 0
     :return bool: whether the path passed all tests (True) or failed at least one (False)
     """
-    
+
     match method_mode:
         case 0:
             test1 = os.path.exists(path)
             test2 = os.path.isfile(path) if supposed_file else os.path.isdir(path)
             test3 = os.path.exists(os.path.abspath(path))
-            
+
         case 1:
             test1 = os.path.exists(path)
             test2 = True
             test3 = os.path.exists(os.path.abspath(path))
-            
+
         case 2:
             test1 = os.path.exists(path)
             test2 = os.path.isfile(path) if supposed_file else os.path.isdir(path)
             test3 = True
-            
+
         case 3:
             test1 = test3 = True
             test2 = os.path.isfile(path) if supposed_file else os.path.isdir(path)
-                
+
     return all((test1, test2, test3))
 
 
@@ -67,43 +67,84 @@ def sort_files_by_criteria(list_of_paths: list[str], criteria: str = 'AZ'):
     match criteria:
         case 'ZA':
             list_of_paths.sort(reverse=True)
-        
+
         case 'time-up':
             list_of_paths.sort(key=lambda i: os.path.getctime(i))
-        
+
         case 'time-down':
             list_of_paths.sort(key=lambda i: os.path.getctime(i), reverse=True)
-            
+
         case 'size-up':
             list_of_paths.sort(key=lambda i: os.path.getsize(i))
-        
+
         case 'size-down':
             list_of_paths.sort(key=lambda i: os.path.getsize(i), reverse=True)
-        
+
         case 'tch-up':
             list_of_paths.sort(key=lambda i: os.path.getmtime(i))
-        
+
         case 'tch-down':
             list_of_paths.sort(key=lambda i: os.path.getmtime(i), reverse=True)
-            
+
         case 'tac-up':
             list_of_paths.sort(key=lambda i: os.path.getatime(i))
-        
+
         case 'tac-down':
             list_of_paths.sort(key=lambda i: os.path.getatime(i), reverse=True)
-            
+
         case _:
             list_of_paths.sort()
+
+
+class Protocol:
+    '''
+    # Protocol Class
+    A class to manage and execute protocols. It allows registering protocols with associated functions
+    and running them with provided arguments.
+
+    ## Methods
+    - `register(protocol: str, function: Any)`: Registers a protocol with a function.
+    - `run_protocol(protocol: str, *args, **kwargs)`: Runs a protocol with the provided arguments.
+    - `__str__()`: Returns a string representation of the protocols.
+    - `__len__()`: Returns the number of protocols registered.
+    '''
+
+    def __init__(self, screen: Screen):
+        """
+        ## Initialization for Protocol class (__init__)
+
+        Initializes the instance with an empty dictionary for protocols.
+
+        :param Screen screen: The screen object where the protocol will be executed.
+        :attribute dict _protocols: A dictionary to store protocol-related information.
+        """
+
+        self._SCREEN = screen
+        self._protocols: dict[str, Any] = {}
+
+    def register(self, protocol: str, function: Any):
+        self._protocols[protocol] = function
+
+    def run_protocol(self, protocol: str, *args, **kwargs):
+        ctx, curated_dict = self._protocols[protocol](*args, **kwargs)
+        ctx.handle_protocol(protocol, **curated_dict)
+        return self._SCREEN.change_context(ctx)
+
+    def __str__(self):
+        return str(self._protocols)
+
+    def __len__(self):
+        return len(self._protocols)
 
 
 class FileBrowser(context.Context):
     """
     # FileBrowser
-    
+
     The FileBrowser class provides a terminal-based file browsing interface. It allows users to navigate
     directories, view files, and access quick access items. The class supports different rendering methods
     and sorting orders for displaying directory contents.
-    
+
     **The parameters below are used with __init__ to create a FileBrowser object, that is, to initialize it.**
 
     :param Screen screen: The screen object where the file browser will be rendered.
@@ -112,10 +153,10 @@ class FileBrowser(context.Context):
     :param title: Optional title for the file browser interface.
     """
 
-    def __init__(self, screen: Screen, quick_access_items: tuple[str] | None = None, keyword_formatters = None, title = None):        
+    def __init__(self, screen: Screen, quick_access_items: tuple[str] | None = None, keyword_formatters = None, title = None):
         """
         ## Initialization for FileBrowser class (__init__)
-        
+
         Initializes the FileBrowser class with the provided parameters. Sets up the screen, quick access items,
         rendering method, rendering order, and current directory. Also prepares the quick access field values
         and file browser field for display.
@@ -125,9 +166,9 @@ class FileBrowser(context.Context):
         :param keyword_formatters: Optional keyword formatters for customizing the display.
         :param title: Optional title for the file browser interface.
         """
-        
+
         self.SCREEN = screen
-                
+
         self._rendering_method = 'list' # [i] can be "grid" or "list"
         self._rendering_order = 'AZ' # [i] can be "AZ", "ZA", "time-up", "time-down", "size-up", "size-down", "tch-up", "tch-down", "tac-up", "tac-down"
                                      # [i] "AZ" and "ZA" are for alphabetical order
@@ -138,111 +179,122 @@ class FileBrowser(context.Context):
                                      # [<] now who the fuck thought these alias would be a good idea?
         self._selection = 0
         self._cur_dir = os.getcwd()
-        
+
         if not quick_access_items:
             quick_access_items = (os.path.expanduser('~'), os.path.expanduser('~'))
-        
+
         self._quick_access_field_values = [f"({i + 1}) {quick_access_items[i] if len(quick_access_items[i]) < 28 else f'{quick_access_items[i][:25]}...'}" for i in range(0, min(len(quick_access_items), 25))]
         self._quick_access_field = ["╔==========================╗", "║                          ║", "╠====== Quick Access ======╣", "║                          ║"]
         self._file_browser_field = ["╔==================================================================╗", "║                                                                  ║", "╠========================== File Browser ==========================╣", "║                                                                  ║"]
         self._details_field = None # TODO
 
         self._cur_dir_content = ['..'] + os.listdir(self._cur_dir)
-        
+
         value = None
-        
+
         super().__init__(screen, value, keyword_formatters, title)
-    
-    def highlight_based_on_designation(self, designations: dict[str, list[str]]) -> dict[str, list[str]]:
+
+    def highlight_based_on_designation(self, designation: str, data: list[str]) -> list[str]:
         """
         ## FileBrowser.highlight_based_on_designation
 
-        This function takes a dictionary where the keys are designations (e.g., 'folder', 'file', etc.)
-        and the values are lists of strings representing items. It returns a dictionary with the same
-        keys, but the items are formatted with ANSI escape codes for terminal highlighting.
-        
-        :param dict[str, list[str]] designations: A dictionary with designations as keys and lists of item names as values.
-        :return dict[str, list[str]]: A dictionary with the same keys, but the item names are formatted with ANSI escape codes.
+        This function takes a designation (e.g., 'folder', 'file', etc.) and a list of strings representing items.
+        It returns a list of strings where each item is formatted with ANSI escape codes for terminal highlighting.
+
+        :param str designation: The designation of the items (e.g., 'folder', 'file', etc.).
+        :param list[str] data: A list of item names to be highlighted.
+        :return list[str]: A list of item names formatted with ANSI escape codes.
         """
-        
-        spam = {'folder': [], 'file': [], "symlink": [], 'mountpoint': [], 'other': []}
-        
-        for k, v in designations.items():
-            for i in v:
-                match k:
-                    case 'folder':
-                        spam['folder'].append(f"{Fore.BLUE}{i}{Fore.RESET}")
-                        
-                    case 'file':
-                        spam['file'].append(f"{Fore.GREEN}{i}{Fore.RESET}")
-                        
-                    case 'symlink':
-                        spam['symlink'].append(f"{set_effect(Effect.BOLD)}{i}{set_effect(Effect.RESET_BOLD)}")       
-                        
-                    case "mountpoint":
-                        spam['mountpoint'].append(f"{Fore.RED}{i}{Fore.RESET}")
-                        
-                    case 'other':
-                        spam['other'].append(f"{set_effect(Effect.UNDERLINE)}{Fore.YELLOW}{i}{set_effect(Effect.RESET_UNDERLINED)}{Fore.RESET}")
-        
+
+        match designation:
+            case 'mountpoint':
+                spam = [f"{Fore.RED}{i}{Fore.RESET}" for i in data]
+                
+            case 'folder':
+                spam = [f"{Fore.BLUE}{i}{Fore.RESET}" for i in data]
+            
+            case 'file':
+                spam = [f"{Fore.GREEN}{i}{Fore.RESET}" for i in data]
+                
+            case 'symlink':
+                spam = [f"{set_effect(Effect.BOLD)}{i}{set_effect(Effect.RESET_BOLD)}" for i in data]
+                
+            case 'other':
+                spam = [f"{set_effect(Effect.UNDERLINE)}{Fore.YELLOW}{i}{set_effect(Effect.RESET_UNDERLINED)}{Fore.RESET}" for i in data]
+
+            case _: # [<] any other value that I did not ask for? well, fuck you; you're getting nothing but unformatted shit from me
+                spam = data.copy() # [<] thou shallt remain UNFORMATTED!
+
         return spam
-    
+
     def get_file_browser_ready(self):
         """
         ## FileBrowser.get_file_browser_ready
-        
+
         This function retrieves the current directory contents, classifies them into
         designations (e.g., 'mountpoint', 'folder', 'file', 'symlink', 'other'), and
         sorts them based on specified criteria. The sorted items are then formatted
         with ANSI escape codes for terminal highlighting.
-        
+
         :return: None
         """
-        
-        self._cur_dir_content = ['..'] + os.listdir(self._cur_dir)
-        designations = self.get_designation_based_on_element_type()
-        
-        sorted_mountpoints = sort_files_by_criteria(designations['mountpoint']) # [i] mountpoints are always sorted by name
-                                                                                    # [i] because they don't have any other criteria to sort by
 
-        sorted_folders = sort_files_by_criteria(designations['folder'], self._rendering_order)
-        sorted_files_and_links = sort_files_by_criteria(designations['file'] + designations['symlink'] + designations['other'], self._rendering_order)
-    
-    
+        # [*] Listing the contents of the current directory
+        self._cur_dir_content: list[str] = ['..'] + [os.path.relpath(i) for i in os.listdir(self._cur_dir)]
+        designations: dict[str, list[str]] = self.get_designation_based_on_element_type()
+
+        # [*] Sorting the contents of the same directory
+        sorted_mountpoints: list[str] = self.highlight_based_on_designation('mountpoint', sort_files_by_criteria(designations['mountpoint'])) # [i] mountpoints are always sorted by name
+                                                                                    # [i] because they don't have any other criteria to sort by
+        sorted_folders: list[str] = self.highlight_based_on_designation('folder', sort_files_by_criteria(designations['folder'], self._rendering_order))
+        sorted_files: list[str] = self.highlight_based_on_designation('file', sort_files_by_criteria(designations['file'], self._rendering_order))
+        sorted_symlinks: list[str] = self.highlight_based_on_designation('symlink', sort_files_by_criteria(designations['symlink'], self._rendering_order))
+        sorted_others: list[str] = self.highlight_based_on_designation('other', sort_files_by_criteria(designations['other'], self._rendering_order))
+        
+        sorted_contents: list[str] = sorted_mountpoints + sorted_folders + sorted_files + sorted_symlinks + sorted_others # [i] we now combine all of these into one list
+        
+        # [*] Setting up the grid/list mechanic
+            # [i] List is very simple, as we just place each file/folder/whatever below each other
+            # [i] Grid is a bit more complex, as we need to calculate the number of columns and rows, as well as the width of each column
+            # [i] not just that but we'll also have to implement a key to swap around between columns,
+            # [i] which is gonna be left and right key and they're NOT gonna loop (like pressing right on the right column warping back to the left column)
+        if self._rendering_method == 'list':
+            filebrowser_lines = []
+        
+
     def get_quick_access_ready(self):
         raise NotImplementedError(self.__doc__)
-    
+
     def draw_to_screen(self):
-        self.SCREEN.writelines(self._lines)        
-    
+        self.SCREEN.writelines(self._lines)
+
     def get_designation_based_on_element_type(self) -> dict[str, list[str]]:
         eggs = {'folder': [], 'file': [], "symlink": [], 'mountpoint': [], 'other': []}
-        
+
         for i in self._cur_dir_content:
             if i == '..':
                 eggs['folder'].append('..')
                 continue
-                
+
             if os.path.isdir(i):
                 eggs['folder'].append(os.path.relpath(i))
                 continue
-            
+
             if os.path.islink(i):
                 eggs['symlink'].append(os.path.relpath(i))
                 continue
-            
+
             if os.path.ismount(i):
                 eggs['mountpoint'].append(os.path.relpath(i))
                 continue
-            
+
             if os.path.isfile(i):
                 eggs['file'].append(os.path.relpath(i))
                 continue
-            
+
             eggs['other'].append(os.path.relpath(i))
-                
+
         return eggs
-    
+
     def highlight_selection(self):
         raise NotImplementedError(self.__doc__)
-        
