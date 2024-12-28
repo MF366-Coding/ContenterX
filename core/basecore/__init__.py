@@ -5,9 +5,57 @@ import sys
 import PIL
 from typing import Any
 from NCapybaraLib import String as string
+from difflib import SequenceMatcher
 
 # [<] why the fuck is this up here?
 filebrowser_formatter = Formatter(True, {})
+
+
+def are_strings_similar(given_string: str, match: str, optimization_level: int = 3):
+    """
+    ## are_strings_similar
+    
+    Determine if two strings are similar based on a given optimization level using the SequenceMatcher algorithm.
+    
+    The SequenceMatcher algorithm is used to compare pairs of sequences. It calculates a similarity ratio based on the number of matching blocks between the sequences.
+    
+    Optimization levels:
+        - 0: Very unoptimized - slow - finds the average between ALL the ratios.
+        - 1: Unoptimized - finds the average between the quickest ratios.
+        - 2: Slightly unoptimized - uses the full ratio calculation.
+        - 3: Recommended optimization - uses the quick ratio.
+        - 4: Way too optimized - may return a very distant upper bound using the real quick ratio.
+
+    :param str given_string: The first string to compare.
+    :param str match: The second string to compare.
+    :param int optimization_level: The level of optimization to use for the comparison (default is 3).
+    :return float: The similarity ratio between the two strings.
+    """
+    
+    seq_matcher = SequenceMatcher(None, given_string, match)
+   
+    match optimization_level:
+        case 0: # [i] very unoptimized - slow as fuck - finds the average between ALL the ratios
+            ratio = (seq_matcher.real_quick_ratio() + seq_matcher.quick_ratio() + seq_matcher.ratio()) / 3
+        
+        case 1: # [i] unoptimized, finds the average between the quickest ratios
+            ratio = (seq_matcher.real_quick_ratio() + seq_matcher.quick_ratio()) / 2
+        
+        case 2: # [i] slightly unoptimized
+            ratio = seq_matcher.ratio()
+            
+        case 3: # [i] recommended optimization
+            ratio = seq_matcher.quick_ratio()
+
+        case 4: # [i] way too optimized lol - may return a very distant upper bound like 1.0 to a value that would be 0.75
+            ratio = seq_matcher.real_quick_ratio()
+            
+        case _:
+            _ = seq_matcher.get_matching_blocks()
+            ratio = seq_matcher.ratio()
+            del _
+            
+    return ratio
 
 
 def test_path(path: str, supposed_file: bool = False, method_mode: int = 0) -> bool:
@@ -168,6 +216,18 @@ class FileBrowser(context.Context):
         """
 
         self.SCREEN = screen
+        self._search_method = 0 # [i] 0 for regular search, uses Norb's String Similarity Algorithm
+                                # [i] 1 for strict search, must match exactly
+                                # [i] 2 for regex search, uses Python's built-in regex engine
+                                # [i] 3 for fuzzy search, uses fuzzywuzzy's algorithm
+                                # [i] 4 for the SequenceMatcher algorithm, opti0
+                                # [i] 5 for the SequenceMatcher algorithm, opti1
+                                # [i] 6 for the SequenceMatcher algorithm, opti2
+                                # [i] 7 for the SequenceMatcher algorithm, opti3
+                                # [i] 8 for the SequenceMatcher algorithm, opti4
+                                # [i] 9 for the SequenceMatcher algorithm, optiANY
+                                # [<] btw optiX means "optimization level X"
+                                # [<] which makes optiANY any other level that isn't 0, 1, 2, 3 or 4
 
         self._rendering_method = 'list' # [i] can be "grid" or "list"
         self._rendering_order = 'AZ' # [i] can be "AZ", "ZA", "time-up", "time-down", "size-up", "size-down", "tch-up", "tch-down", "tac-up", "tac-down"
@@ -192,7 +252,7 @@ class FileBrowser(context.Context):
 
         value = None
 
-        super().__init__(screen, value, keyword_formatters, title)
+        super().__init__(screen, value, keyword_formatters, title)    
 
     def highlight_based_on_designation(self, designation: str, data: list[str]) -> list[str]:
         """
@@ -260,7 +320,10 @@ class FileBrowser(context.Context):
             # [i] which is gonna be left and right key and they're NOT gonna loop (like pressing right on the right column warping back to the left column)
         if self._rendering_method == 'list':
             filebrowser_lines = []
-        
+    
+    def highlight_if_match(self, filename: str):
+        filebrowser_lines = []
+        # TODO
 
     def get_quick_access_ready(self):
         raise NotImplementedError(self.__doc__)
