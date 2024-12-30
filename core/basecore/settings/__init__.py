@@ -4,10 +4,37 @@ import sys
 
 
 class Settings:
+    class FileBrowser:
+        def __init__(self, parent: 'Settings'):
+            self._settings: dict[str, Any] = parent._settings['fileBrowser']
+            self._PARENT: 'Settings' = parent
+        
+        def reload_settings(self):
+            self._settings = self._PARENT._settings['fileBrowser']
+        
+        def __getitem__(self, key: str) -> Any:
+            return self._settings[key]
+        
+        def __setitem__(self, key: str, value: Any) -> None:
+            self._PARENT._settings['fileBrowser'][key] = value
+            self.reload_settings()
+    
     def __init__(self, filepath: str, defaults: dict[str, Any]):
         self._path = filepath
         self._defaults = defaults
+        self._settings = {}
         
+        self.load_settings()
+        
+        # TODO: later on, we'll have more of these subclasses to initialize
+        self.filebrowser: 'Settings.FileBrowser' = self.FileBrowser(self)
+        
+        self._children = [self.filebrowser]
+    
+    def reload_all_children(self) -> None:
+        for child in self._children:
+            child.reload_settings()
+    
     def load_settings(self):
         """
         ## Settings.load_settings

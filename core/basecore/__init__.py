@@ -1,9 +1,11 @@
 from screen import context, Screen
+from settings import Settings
 from screen.formatting import Formatter, set_effect, Effect, set_viewport_title, wipe_line, clear_viewport, change_cursor_visibility, Fore, Back, Cursor
 import os
 import sys
 import PIL
-from typing import Any
+import re
+from typing import Any, NoReturn
 from NCapybaraLib import String as string
 from difflib import SequenceMatcher
 
@@ -11,7 +13,7 @@ from difflib import SequenceMatcher
 filebrowser_formatter = Formatter(True, {})
 
 
-def are_strings_similar(given_string: str, match: str, optimization_level: int = 3):
+def are_strings_similar(given_string: str, match: str, case_sensitive: bool = False, optimization_level: int = 3, perform_previous_verification: bool = True):
     """
     ## are_strings_similar
     
@@ -33,7 +35,17 @@ def are_strings_similar(given_string: str, match: str, optimization_level: int =
     """
     
     seq_matcher = SequenceMatcher(None, given_string, match)
-   
+    
+    if not case_sensitive:
+        given_string = given_string.casefold()
+        match = match.casefold()
+        # [i] casefold is used to make the comparison case-insensitive
+        # [<] fun fact: casefold is better than lower because it can handle more characters than lower can
+        # [<] or should I say inter-lingual characters like the German ß or the Turkish ı, ü, ş, ğ, ö, ç
+    
+    if perform_previous_verification and given_string == match:
+        return 1.0 # [i] if the strings are the same, the similarity ratio is 1.0
+    
     match optimization_level:
         case 0: # [i] very unoptimized - slow as fuck - finds the average between ALL the ratios
             ratio = (seq_matcher.real_quick_ratio() + seq_matcher.quick_ratio() + seq_matcher.ratio()) / 3
@@ -48,6 +60,7 @@ def are_strings_similar(given_string: str, match: str, optimization_level: int =
             ratio = seq_matcher.quick_ratio()
 
         case 4: # [i] way too optimized lol - may return a very distant upper bound like 1.0 to a value that would be 0.75
+                # [<] funny shit
             ratio = seq_matcher.real_quick_ratio()
             
         case _:
@@ -144,6 +157,136 @@ def sort_files_by_criteria(list_of_paths: list[str], criteria: str = 'AZ'):
             list_of_paths.sort()
 
 
+def __search_files(type_of_search: int, list_of_files: list[str], what_to_match: str, **kwargs) -> list[str] | NoReturn:
+    match type_of_search:
+        case 'fuzzy':
+            match kwargs['algorithm']:
+                case 1: # [i] NCapybaraLib's Algorithm
+                    ratios: list[float] = []
+                    
+                    for filename in list_of_files:
+                        ratios.append(string.string_similarity(filename, what_to_match, kwargs.get('case_sensitive', False), kwargs.get('round_output', 0)))
+                    
+                    new_list = list_of_files.copy()
+                    new_list.sort(key=lambda i: ratios[list_of_files.index(i)], reverse=True)
+                    return new_list
+                
+                case 2: # [i] SequenceMather's Algorithm
+                    ratios: list[float] = []
+                    
+                    for filename in list_of_files:
+                        ratios.append(are_strings_similar(filename, what_to_match, kwargs.get('case_sensitive', False), kwargs.get('optimization_level', 3), kwargs.get('previous_verification', True)))
+                    
+                    new_list: list[str] = list_of_files.copy()
+                    new_list.sort(key=lambda i: ratios[list_of_files.index(i)], reverse=True)
+                    return new_list
+
+                case _:
+                    return __search_files('fuzzy', list_of_files, what_to_match, algorithm=2, case_sensitive=kwargs.get('case_sensitive', False), optimization_level=kwargs.get('optimization_level', 3), previous_verification=kwargs.get('previous_verification', True))
+        
+        case 'regex':
+            regex_matches: list[str] = []
+            
+            for filename in list_of_files:
+                if re.search(what_to_match, filename):
+                    regex_matches.append(filename)
+                    
+            regex_matches.sort()
+            new_list: list[str] = list_of_files.copy()
+            new_list.sort()
+            
+            return regex_matches + new_list
+        
+        case 'strict': # [i] what_to_match must be contained in the filename, but doesn't have to be exactly the same as it
+            if not kwargs.get('case_sensitive', False):
+                what_to_match = what_to_match.casefold()
+                temp: list[str] = [i.casefold() for i in list_of_files]
+            
+            else:
+                temp: list[str] = list_of_files.copy()
+            
+            matches: list[str] = [i for i in temp if what_to_match in i]
+            matches.sort()
+            temp.sort()
+            return matches + temp
+        
+        case 'exact': # [i] what_to_match must be EXACTLY the same as the filename for it to be considered a match
+            if not kwargs.get('case_sensitive', False):
+                what_to_match = what_to_match.casefold()
+                temp: list[str] = [i.casefold() for i in list_of_files]
+            
+            else:
+                temp: list[str] = list_of_files.copy()
+            
+            matches: list[str] = [i for i in temp if what_to_match == i]
+            matches.sort()
+            temp.sort()
+            return matches + temp
+        
+        case _:
+            raise ValueError('no such search type exists')
+
+
+def fuzzy_search(list_of_files: list[str], what_to_match: str, case_sensitive: bool = False, algorithm: int = 1, optimization_level: int = 3, previous_verification: bool = True) -> list[str]:
+    """
+    ## fuzzy_search
+    
+    Perform a fuzzy search on a list of files.
+
+    :param list[str] list_of_files: List of file names to search within.
+    :param str what_to_match: The string to match against the file names.
+    :param bool case_sensitive: If True, the search will be case sensitive. Defaults to False.
+    :param int algorithm: The algorithm to use for the fuzzy search. Defaults to 1.
+    :param int optimization_level: The level of optimization to apply to the search. Defaults to 3.
+    :param bool previous_verification: If True, perform a previous verification step before the search. Defaults to True.
+    :return list[str]: A list of file names that match the search criteria.
+    """
+    return __search_files('fuzzy', list_of_files, what_to_match, case_sensitive=case_sensitive, algorithm=algorithm, optimization_level=optimization_level, previous_verification=previous_verification)
+
+
+def regex_search(list_of_files: list[str], what_to_match: str) -> list[str]:
+    """
+    ## regex_search
+    
+    Searches for files matching a regex pattern.
+
+    :param list[str] list_of_files: List of file paths to search.
+    :param str what_to_match: Regex pattern to match in the files.
+    :return list[str]: List of file paths that match the regex pattern.
+    """
+    return __search_files('regex', list_of_files, what_to_match)
+
+
+def strict_search(list_of_files: list[str], what_to_match: str, case_sensitive: bool = False) -> list[str]:
+    """
+    ## strict_search
+    
+    Searches for files that strictly contain the given string.
+
+    :param list[str] list_of_files: List of file paths to search.
+    :param str what_to_match: The string to match in the files.
+    :param bool case_sensitive: If True, the search will be case sensitive. Defaults to False.
+    :return list[str]: List of file paths that strictly contain the given string.
+    """
+    
+    return __search_files('strict', list_of_files, what_to_match, case_sensitive=case_sensitive)
+
+
+def exact_search(list_of_files: list[str], what_to_match: str, case_sensitive: bool = False) -> list[str]:
+    """
+    ## exact_search
+    
+    Searches for files that exactly match the given string.
+
+    :param list[str] list_of_files: List of file paths to search.
+    :param str what_to_match: The exact string to match in the files.
+    :param bool case_sensitive: If True, the search will be case sensitive. Defaults to False.
+    :return list[str]: List of file paths that exactly match the given string.
+    """
+    
+    return __search_files('exact', list_of_files, what_to_match, case_sensitive=case_sensitive)
+
+
 class Protocol:
     '''
     # Protocol Class
@@ -193,42 +336,52 @@ class FileBrowser(context.Context):
     directories, view files, and access quick access items. The class supports different rendering methods
     and sorting orders for displaying directory contents.
 
-    **The parameters below are used with __init__ to create a FileBrowser object, that is, to initialize it.**
+    **The parameters below are used with \_\_init\_\_ to create a FileBrowser object, that is, to initialize it.**
 
     :param Screen screen: The screen object where the file browser will be rendered.
+    :param Settings.FileBrowser filebrowser_settings: Settings for the file browser.
     :param tuple[str] quick_access_items: A tuple of paths for quick access items. Defaults to only 1 quick access item, which is the user's home directory.
     :param keyword_formatters: Optional keyword formatters for customizing the display.
     :param title: Optional title for the file browser interface.
     """
 
-    def __init__(self, screen: Screen, quick_access_items: tuple[str] | None = None, keyword_formatters = None, title = None):
+    def __init__(self, screen: Screen, filebrowser_settings: Settings.FileBrowser, quick_access_items: tuple[str] | None = None, keyword_formatters = None, title = None):
         """
-        ## Initialization for FileBrowser class (__init__)
+        ## Initialization for FileBrowser class (\_\_init\_\_)
 
         Initializes the FileBrowser class with the provided parameters. Sets up the screen, quick access items,
         rendering method, rendering order, and current directory. Also prepares the quick access field values
         and file browser field for display.
 
         :param Screen screen: The screen object where the file browser will be rendered.
+        :param Settings.FileBrowser filebrowser_settings: Settings for the file browser.
         :param tuple[str] quick_access_items: A tuple of paths for quick access items. Defaults to the user's home directory if not provided.
         :param keyword_formatters: Optional keyword formatters for customizing the display.
         :param title: Optional title for the file browser interface.
         """
 
-        self.SCREEN = screen
-        self._search_method = 0 # [i] 0 for regular search, uses Norb's String Similarity Algorithm
-                                # [i] 1 for strict search, must match exactly
-                                # [i] 2 for regex search, uses Python's built-in regex engine
-                                # [i] 3 for fuzzy search, uses fuzzywuzzy's algorithm
-                                # [i] 4 for the SequenceMatcher algorithm, opti0
-                                # [i] 5 for the SequenceMatcher algorithm, opti1
-                                # [i] 6 for the SequenceMatcher algorithm, opti2
-                                # [i] 7 for the SequenceMatcher algorithm, opti3
-                                # [i] 8 for the SequenceMatcher algorithm, opti4
-                                # [i] 9 for the SequenceMatcher algorithm, optiANY
-                                # [<] btw optiX means "optimization level X"
-                                # [<] which makes optiANY any other level that isn't 0, 1, 2, 3 or 4
-
+        self.SCREEN: Screen = screen
+        self._SETTINGS: Settings.FileBrowser = filebrowser_settings
+        
+        # [*] Search-related variables
+        self._string_similarity_algo = self._SETTINGS['stringSimilarityAlgorithm']  # [i] 0 for regular search, uses Norb's String Similarity Algorithm
+                                                                                        # [i] 1 for strict search, must match exactly
+                                                                                        # [i] 2 for regex search, uses Python's built-in regex engine
+                                                                                        # [i] 3 for fuzzy search, uses fuzzywuzzy's algorithm
+                                                                                        # [i] 4 for the SequenceMatcher algorithm, opti0
+                                                                                        # [i] 5 for the SequenceMatcher algorithm, opti1
+                                                                                        # [i] 6 for the SequenceMatcher algorithm, opti2
+                                                                                        # [i] 7 for the SequenceMatcher algorithm, opti3
+                                                                                        # [i] 8 for the SequenceMatcher algorithm, opti4
+                                                                                        # [i] 9 for the SequenceMatcher algorithm, optiANY 
+                                                                                        # [<] btw optiX means "optimization level X"
+                                                                                        # [<] which makes optiANY any other level that isn't 0, 1, 2, 3 or 4
+                                                                                        # [<] who the fuck... y'know what... fuck this
+        self._search_method = self._SETTINGS['searchMethod'] # [i] can be 'fuzzy', 'regex', 'exact', 'strict'
+        self._search_keyword: str | None = None
+        
+        
+        
         self._rendering_method = 'list' # [i] can be "grid" or "list"
         self._rendering_order = 'AZ' # [i] can be "AZ", "ZA", "time-up", "time-down", "size-up", "size-down", "tch-up", "tch-down", "tac-up", "tac-down"
                                      # [i] "AZ" and "ZA" are for alphabetical order
@@ -237,6 +390,7 @@ class FileBrowser(context.Context):
                                      # [i] "tch-up" and "tch-down" are for time of last change
                                      # [i] "tac-up" and "tac-down" are for time of last access
                                      # [<] now who the fuck thought these alias would be a good idea?
+
         self._selection = 0
         self._cur_dir = os.getcwd()
 
@@ -298,11 +452,14 @@ class FileBrowser(context.Context):
 
         :return: None
         """
-
+        
         # [*] Listing the contents of the current directory
         self._cur_dir_content: list[str] = ['..'] + [os.path.relpath(i) for i in os.listdir(self._cur_dir)]
         designations: dict[str, list[str]] = self.get_designation_based_on_element_type()
 
+        # [?] Is the user searching something?
+        # TODO: handle this
+        
         # [*] Sorting the contents of the same directory
         sorted_mountpoints: list[str] = self.highlight_based_on_designation('mountpoint', sort_files_by_criteria(designations['mountpoint'])) # [i] mountpoints are always sorted by name
                                                                                     # [i] because they don't have any other criteria to sort by
