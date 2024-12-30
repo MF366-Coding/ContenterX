@@ -1,3 +1,6 @@
 colorama==0.4.6
+keyboard==0.13.5
+NCapybaraLib==1.1.0
+Pillow==11.0.0
 PyLocalizer==0.0.2
 simple_webbrowser==0.2.2
