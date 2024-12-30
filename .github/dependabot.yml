@@ -17,4 +17,6 @@ updates:
       - "MF366-Coding"
     commit-message:
       prefix: "pip"
+    labels:
+      - "Dependency"
       
