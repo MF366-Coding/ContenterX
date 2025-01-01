@@ -13,6 +13,20 @@ from difflib import SequenceMatcher
 filebrowser_formatter = Formatter(True, {})
 
 
+def list_difference(a: list[Any], b: list[Any] | None = None):
+    if not b:
+        return a
+    
+    return [i for i in a if i not in b]
+
+
+def split_list(l: list[Any], a: Any) -> list[Any] | tuple[list[Any], list[Any]]:
+    if a not in l:
+        return l
+    
+    return l[:l.index(a)], l[l.index(a) + 1:]
+
+
 def are_strings_similar(given_string: str, match: str, case_sensitive: bool = False, optimization_level: int = 3, perform_previous_verification: bool = True):
     """
     ## are_strings_similar
@@ -124,7 +138,7 @@ def test_path(path: str, supposed_file: bool = False, method_mode: int = 0) -> b
     return all((test1, test2, test3))
 
 
-def sort_files_by_criteria(list_of_paths: list[str], criteria: str = 'AZ'):
+def sort_files_by_criteria(list_of_paths: list[str], criteria: str = 'AZ', *_, fuzzy_ratios: list[float] | None = None):
     match criteria:
         case 'ZA':
             list_of_paths.sort(reverse=True)
@@ -153,37 +167,18 @@ def sort_files_by_criteria(list_of_paths: list[str], criteria: str = 'AZ'):
         case 'tac-down':
             list_of_paths.sort(key=lambda i: os.path.getatime(i), reverse=True)
 
+        case 'fuzzy':
+            if not fuzzy_ratios:
+                raise ValueError("fuzzy_ratios must be provided when sorting by fuzzy criteria")
+            
+            list_of_paths.sort(key=lambda i: fuzzy_ratios[list_of_paths.index(i)], reverse=True)
+        
         case _:
             list_of_paths.sort()
 
 
 def __search_files(type_of_search: int, list_of_files: list[str], what_to_match: str, **kwargs) -> list[str] | NoReturn:
-    match type_of_search:
-        case 'fuzzy':
-            match kwargs['algorithm']:
-                case 1: # [i] NCapybaraLib's Algorithm
-                    ratios: list[float] = []
-                    
-                    for filename in list_of_files:
-                        ratios.append(string.string_similarity(filename, what_to_match, kwargs.get('case_sensitive', False), kwargs.get('round_output', 0)))
-                    
-                    new_list = list_of_files.copy()
-                    new_list.sort(key=lambda i: ratios[list_of_files.index(i)], reverse=True)
-                    return new_list
-                
-                case 2: # [i] SequenceMather's Algorithm
-                    ratios: list[float] = []
-                    
-                    for filename in list_of_files:
-                        ratios.append(are_strings_similar(filename, what_to_match, kwargs.get('case_sensitive', False), kwargs.get('optimization_level', 3), kwargs.get('previous_verification', True)))
-                    
-                    new_list: list[str] = list_of_files.copy()
-                    new_list.sort(key=lambda i: ratios[list_of_files.index(i)], reverse=True)
-                    return new_list
-
-                case _:
-                    return __search_files('fuzzy', list_of_files, what_to_match, algorithm=2, case_sensitive=kwargs.get('case_sensitive', False), optimization_level=kwargs.get('optimization_level', 3), previous_verification=kwargs.get('previous_verification', True))
-        
+    match type_of_search:               
         case 'regex':
             regex_matches: list[str] = []
             
@@ -195,7 +190,8 @@ def __search_files(type_of_search: int, list_of_files: list[str], what_to_match:
             new_list: list[str] = list_of_files.copy()
             new_list.sort()
             
-            return regex_matches + new_list
+            return regex_matches + [1] + list_difference(new_list, regex_matches) # [i] why is there a 1, you might be wondering
+                                                                                  # [i] it's basically a very spaghetti code way of separating the 2 lists lol
         
         case 'strict': # [i] what_to_match must be contained in the filename, but doesn't have to be exactly the same as it
             if not kwargs.get('case_sensitive', False):
@@ -208,7 +204,7 @@ def __search_files(type_of_search: int, list_of_files: list[str], what_to_match:
             matches: list[str] = [i for i in temp if what_to_match in i]
             matches.sort()
             temp.sort()
-            return matches + temp
+            return matches + [1] + list_difference(temp, matches)
         
         case 'exact': # [i] what_to_match must be EXACTLY the same as the filename for it to be considered a match
             if not kwargs.get('case_sensitive', False):
@@ -221,13 +217,23 @@ def __search_files(type_of_search: int, list_of_files: list[str], what_to_match:
             matches: list[str] = [i for i in temp if what_to_match == i]
             matches.sort()
             temp.sort()
-            return matches + temp
+            return matches + [1] + list_difference(temp, matches)
+        
+        case 'filetype': # [i] what_to_match's file extension must be EXACTLY the same as the filename for it to be considered a match
+                        # [i] will ALWAYS be case insensitive
+            what_to_match: str = what_to_match.split('.')[-1].casefold() # [i] in case the user introduces a full filename, that part gets snapped
+            temp: list[str] = [i.casefold() for i in list_of_files]
+            
+            matches = [temp.pop(temp.index(i)) for i in temp if what_to_match == i.split('.')[-1]]
+            matches.sort()
+            temp.sort()
+            return matches + [1] + list_difference(temp, matches)
         
         case _:
-            raise ValueError('no such search type exists')
+            raise ValueError('no such search type exists' if type_of_search != 'fuzzy' else 'fuzzy search is not supported in this function - please use the fuzzy_search function')
 
 
-def fuzzy_search(list_of_files: list[str], what_to_match: str, case_sensitive: bool = False, algorithm: int = 1, optimization_level: int = 3, previous_verification: bool = True) -> list[str]:
+def fuzzy_search(list_of_files: list[str], what_to_match: str, case_sensitive: bool = False, algorithm: int = 1, optimization_level: int = 3, previous_verification: bool = True, round_output: int = 0) -> list[float]:
     """
     ## fuzzy_search
     
@@ -236,19 +242,35 @@ def fuzzy_search(list_of_files: list[str], what_to_match: str, case_sensitive: b
     :param list[str] list_of_files: List of file names to search within.
     :param str what_to_match: The string to match against the file names.
     :param bool case_sensitive: If True, the search will be case sensitive. Defaults to False.
-    :param int algorithm: The algorithm to use for the fuzzy search. Defaults to 1.
-    :param int optimization_level: The level of optimization to apply to the search. Defaults to 3.
-    :param bool previous_verification: If True, perform a previous verification step before the search. Defaults to True.
-    :return list[str]: A list of file names that match the search criteria.
+    :param int algorithm: The algorithm to use for the fuzzy search. As for the time being, there are only 2. Defaults to 1.
+    :param int optimization_level: The level of optimization to apply to the search. Defaults to 3. [SPECIFIC TO ALGO 2]
+    :param bool previous_verification: If True, perform a previous verification step before the search. Defaults to True. [SPECIFIC TO ALGO 2]
+    :param int round_output: Round the output to a specified decimal point. Default 0 (no rounding). [SPECIFIC TO ALGO 1]
+    :return list[float]: The similarity ratios for all the strings.
     """
-    return __search_files('fuzzy', list_of_files, what_to_match, case_sensitive=case_sensitive, algorithm=algorithm, optimization_level=optimization_level, previous_verification=previous_verification)
+    
+    ratios = []
+    
+    match algorithm:
+        case 1: # [i] NCapybaraLib's Algorithm           
+            for filename in list_of_files:
+                ratios.append(string.string_similarity(filename, what_to_match, case_sensitive, round_output))
+        
+        case 2: # [i] SequenceMatcher Algorithm
+            for filename in list_of_files:
+                ratios.append(are_strings_similar(filename, what_to_match, case_sensitive, optimization_level, previous_verification))
+
+        case _:
+            raise ValueError('no such algorithm exists - as for the time being, there are only 2, with IDs 1 and 2')
+        
+    return ratios
 
 
 def regex_search(list_of_files: list[str], what_to_match: str) -> list[str]:
     """
     ## regex_search
     
-    Searches for files matching a regex pattern.
+    Searches for files matching a regex pattern. Case sensitivity setting is always ignored by this search method.
 
     :param list[str] list_of_files: List of file paths to search.
     :param str what_to_match: Regex pattern to match in the files.
@@ -285,6 +307,20 @@ def exact_search(list_of_files: list[str], what_to_match: str, case_sensitive: b
     """
     
     return __search_files('exact', list_of_files, what_to_match, case_sensitive=case_sensitive)
+
+
+def filetype_search(list_of_files: list[str], what_to_match: str) -> list[str]:
+    """
+    ## filetype_search
+    
+    Searches for files that have the same file extension. Is always case insensitive.
+
+    :param list[str] list_of_files: List of file paths to search.
+    :param str what_to_match: The exact string to match in the files.
+    :return list[str]: List of file paths that exactly match the given string.
+    """
+    
+    return __search_files('filetype', list_of_files, what_to_match)
 
 
 class Protocol:
@@ -364,7 +400,7 @@ class FileBrowser(context.Context):
         self._SETTINGS: Settings.FileBrowser = filebrowser_settings
         
         # [*] Search-related variables
-        self._string_similarity_algo = self._SETTINGS['stringSimilarityAlgorithm']  # [i] 0 for regular search, uses Norb's String Similarity Algorithm
+        self._string_similarity_algo: int = self._SETTINGS['stringSimilarityAlgorithm'] # [i] 0 for regular search, uses Norb's String Similarity Algorithm
                                                                                         # [i] 1 for strict search, must match exactly
                                                                                         # [i] 2 for regex search, uses Python's built-in regex engine
                                                                                         # [i] 3 for fuzzy search, uses fuzzywuzzy's algorithm
@@ -377,9 +413,12 @@ class FileBrowser(context.Context):
                                                                                         # [<] btw optiX means "optimization level X"
                                                                                         # [<] which makes optiANY any other level that isn't 0, 1, 2, 3 or 4
                                                                                         # [<] who the fuck... y'know what... fuck this
-        self._search_method = self._SETTINGS['searchMethod'] # [i] can be 'fuzzy', 'regex', 'exact', 'strict'
+        self._search_method: str = self._SETTINGS['searchMethod'] # [i] can be 'fuzzy', 'regex', 'exact', 'strict' or 'filetype'
         self._search_keyword: str | None = None
-        
+        self._sequence_matcher_optimization: int = self._SETTINGS['sequenceMatcherOptimization']
+        self._sequence_matcher_verify: int = self._SETTINGS['sequenceMatcherPrevVerification']
+        self._search_case_sensitivity: bool = self._SETTINGS['searchCaseSensitive']
+        self._fuzzy_ratios: list[float] = []
         
         
         self._rendering_method = 'list' # [i] can be "grid" or "list"
@@ -440,7 +479,64 @@ class FileBrowser(context.Context):
                 spam = data.copy() # [<] thou shallt remain UNFORMATTED!
 
         return spam
-
+   
+    def highlight_search_results(self) -> list[str]:
+        match self._search_method.lower():
+            case 'regex':
+                files: list[str] = regex_search(self._cur_dir_content, self._search_keyword)
+                matches, others = split_list(files, 1)
+                
+                temp = []
+                
+                for match in matches:
+                    temp.append(f"{Back.YELLOW}{Fore.BLACK}{match}{Fore.RESET}{Back.RESET}")
+                
+                del matches
+                
+                return temp + others
+                
+            case 'strict':
+                files = strict_search(self._cur_dir_content, self._search_keyword, self._search_case_sensitivity)
+                matches, others = split_list(files, 1)
+                
+                temp = []
+                
+                for match in matches:
+                    temp.append(f"{Back.YELLOW}{Fore.BLACK}{match}{Fore.RESET}{Back.RESET}")
+                
+                del matches
+                
+                return temp + others
+            
+            case 'exact':
+                files = exact_search(self._cur_dir_content, self._search_keyword, self._search_case_sensitivity)
+                matches, others = split_list(files, 1)
+                
+                temp = []
+                
+                for match in matches:
+                    temp.append(f"{Back.YELLOW}{Fore.BLACK}{match}{Fore.RESET}{Back.RESET}")
+                
+                del matches
+                
+                return temp + others
+            
+            case 'filetype':
+                files = filetype_search(self._cur_dir_content, self._search_keyword)
+                matches, others = split_list(files, 1)
+                
+                temp = []
+                
+                for match in matches:
+                    temp.append(f"{Back.YELLOW}{Fore.BLACK}{match}{Fore.RESET}{Back.RESET}")
+                
+                del matches
+                
+                return temp + others
+            
+            case _:
+                raise ValueError("no such search method exists" if self._search_method != 'fuzzy' else "fuzzy search is not supported in this function - please use the sorting function but with the argument set to \"fuzzy\" instead")
+    
     def get_file_browser_ready(self):
         """
         ## FileBrowser.get_file_browser_ready
@@ -455,20 +551,45 @@ class FileBrowser(context.Context):
         
         # [*] Listing the contents of the current directory
         self._cur_dir_content: list[str] = ['..'] + [os.path.relpath(i) for i in os.listdir(self._cur_dir)]
-        designations: dict[str, list[str]] = self.get_designation_based_on_element_type()
-
+        sorted_contents: list[str] | None = None
+        
         # [?] Is the user searching something?
-        # TODO: handle this
+        # [?] If he is, is he using Fuzzy Searching? - that one is a bit of an odd ball and has to be handled separately
+        if self._search_keyword and self._search_method.lower() != 'fuzzy':
+            # [i] the user is indeed searching something with either regex, strict, exact or filetype
+            # [i] therefore we are not gonna do the regular sorting mechanic
+            # [i] we're gonna do the search mechanic instead
+            sorted_contents = self.highlight_search_results() # [i] searched and highlighted, how cool :O
         
-        # [*] Sorting the contents of the same directory
-        sorted_mountpoints: list[str] = self.highlight_based_on_designation('mountpoint', sort_files_by_criteria(designations['mountpoint'])) # [i] mountpoints are always sorted by name
-                                                                                    # [i] because they don't have any other criteria to sort by
-        sorted_folders: list[str] = self.highlight_based_on_designation('folder', sort_files_by_criteria(designations['folder'], self._rendering_order))
-        sorted_files: list[str] = self.highlight_based_on_designation('file', sort_files_by_criteria(designations['file'], self._rendering_order))
-        sorted_symlinks: list[str] = self.highlight_based_on_designation('symlink', sort_files_by_criteria(designations['symlink'], self._rendering_order))
-        sorted_others: list[str] = self.highlight_based_on_designation('other', sort_files_by_criteria(designations['other'], self._rendering_order))
+        else:
+            # [*] Getting the designations of the elements in the current directory
+            designations: dict[str, list[str]] = self.get_designation_based_on_element_type()
+            
+            # [?] So, at this point, the user could be: not searching or searching with fuzzy. let's see
+            if self._search_keyword: # [i] since we already verified it wasn't fuzzy before it has to be fuzzy NOW so we don't need to bother checking
+                # [i] the user is searching with fuzzy
+                # [i] we're gonna have to sort the files based on the fuzzy ratios
+                # [i] and we're also gonna do the regular highlighting according to the designations
+                sorted_mountpoints: list[str] = self.highlight_based_on_designation('mountpoint', designations['mountpoint'])
+                sorted_folders: list[str] = self.highlight_based_on_designation('folder', designations['folder'])
+                sorted_files: list[str] = self.highlight_based_on_designation('file', designations['file'])
+                sorted_symlinks: list[str] = self.highlight_based_on_designation('symlink', designations['symlink'])
+                sorted_others: list[str] = self.highlight_based_on_designation('other', designations['other'])
+            
+                sorted_contents: list[str] = sort_files_by_criteria(sorted_mountpoints + sorted_folders + sorted_files + sorted_symlinks + sorted_others, 'fuzzy', self._fuzzy_ratios) # [i] we now combine all of these into one list
+            
+            else:
+                # [*] Sorting the contents of the same directory
+                sorted_mountpoints: list[str] = self.highlight_based_on_designation('mountpoint', sort_files_by_criteria(designations['mountpoint'])) # [i] mountpoints are always sorted by name
+                                                                                            # [i] because they don't have any other criteria to sort by
+                sorted_folders: list[str] = self.highlight_based_on_designation('folder', sort_files_by_criteria(designations['folder'], self._rendering_order))
+                sorted_files: list[str] = self.highlight_based_on_designation('file', sort_files_by_criteria(designations['file'], self._rendering_order))
+                sorted_symlinks: list[str] = self.highlight_based_on_designation('symlink', sort_files_by_criteria(designations['symlink'], self._rendering_order))
+                sorted_others: list[str] = self.highlight_based_on_designation('other', sort_files_by_criteria(designations['other'], self._rendering_order))
+                
+                sorted_contents: list[str] = sorted_mountpoints + sorted_folders + sorted_files + sorted_symlinks + sorted_others # [i] we now combine all of these into one list
         
-        sorted_contents: list[str] = sorted_mountpoints + sorted_folders + sorted_files + sorted_symlinks + sorted_others # [i] we now combine all of these into one list
+        # TODO
         
         # [*] Setting up the grid/list mechanic
             # [i] List is very simple, as we just place each file/folder/whatever below each other
@@ -477,12 +598,9 @@ class FileBrowser(context.Context):
             # [i] which is gonna be left and right key and they're NOT gonna loop (like pressing right on the right column warping back to the left column)
         if self._rendering_method == 'list':
             filebrowser_lines = []
-    
-    def highlight_if_match(self, filename: str):
-        filebrowser_lines = []
-        # TODO
 
     def get_quick_access_ready(self):
+        # TODO
         raise NotImplementedError(self.__doc__)
 
     def draw_to_screen(self):
@@ -517,4 +635,5 @@ class FileBrowser(context.Context):
         return eggs
 
     def highlight_selection(self):
+        # TODO
         raise NotImplementedError(self.__doc__)
