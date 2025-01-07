@@ -13,6 +13,9 @@ import hashlib
 from difflib import SequenceMatcher
 
 
+class InvalidSelection(Exception): ...
+
+
 # [*] Constants
 MAX_FILENAME_LENGHT_GRID2 = 100
 MAX_FILENAME_LENGHT_GRID3 = 55
@@ -423,7 +426,7 @@ class FileBrowser(context.Context):
         self._fuzzy_ratios: list[float] = []
 
         # [*] Render related variables
-        self._rendering_method = self._SETTINGS['displayMethod'] # [i] can be "grid2", "grid3" or "list"
+        self._rendering_method = self._SETTINGS['displayMethod'] # [i] can be "grid2", "grid3", "centeredlist" "list"
         self._rendering_order = self._SETTINGS['displayOrder'] # [i] can be "AZ", "ZA", "time-up", "time-down", "size-up", "size-down", "tch-up", "tch-down", "tac-up", "tac-down"
                                                                    # [i] "AZ" and "ZA" are for alphabetical order
                                                                    # [i] "time-up" and "time-down" are for time of creation
@@ -432,7 +435,7 @@ class FileBrowser(context.Context):
                                                                    # [i] "tac-up" and "tac-down" are for time of last access
                                                                    # [<] now who the fuck thought these alias would be a good idea?
 
-        # [*] Selectiona nd current directory
+        # [*] Selection and current directory
         self._selection = 0
         self._cur_dir: str = os.getcwd()
 
@@ -442,7 +445,6 @@ class FileBrowser(context.Context):
 
         self._quick_access_field_values = [f"({i + 1}) {quick_access_items[i] if len(quick_access_items[i]) < 28 else f'{quick_access_items[i][:25]}...'}" for i in range(0, min(len(quick_access_items), 25))]
         self._quick_access_field = ["╔==========================╗", "║                          ║", "╠====== Quick Access ======╣", "║                          ║"]
-        self._file_browser_field = ["╔==================================================================╗", "║                                                                  ║", "╠========================== File Browser ==========================╣", "║                                                                  ║"]
         self._details_field = None # TODO
 
         value = None
@@ -538,7 +540,7 @@ class FileBrowser(context.Context):
 
             case _:
                 raise ValueError("no such search method exists" if self._search_method != 'fuzzy' else "fuzzy search is not supported in this function - please use the sorting function but with the argument set to \"fuzzy\" instead")
-    
+
     def get_file_browser_ready(self):
         """
         ## FileBrowser.get_file_browser_ready
@@ -592,24 +594,54 @@ class FileBrowser(context.Context):
 
                 sorted_contents: list[str] = sorted_mountpoints + sorted_folders + sorted_files + sorted_symlinks + sorted_others # [i] we now combine all of these into one list
 
+        # [*] Highlight the current selection
+        sorted_contents.insert(0, f"{Fore.BLUE}..{Fore.RESET}") # [i] force the parent directory to be the first item, no mather the searching order and/or sorting
+        self.highlight_selection(sorted_contents)
+
         # [*] Setting up the grid/list mechanic
             # [i] List is very simple, as we just place each file/folder/whatever below each other
             # [i] Grid is a bit more complex, as we need to calculate the number of columns and rows, as well as the width of each column
             # [i] not just that but we'll also have to implement a key to swap around between columns,
             # [i] which is gonna be left and right key and they're NOT gonna loop (like pressing right on the right column warping back to the left column)
-        if self._rendering_method == 'list':
-            filebrowser_lines = sorted_contents
-            
-        elif self._rendering_method == 'grid2':
+        if self._rendering_method == 'grid2':
             # [i] stands for grid with 2 columns
             avg_length: int = sum([len(i) for i in sorted_contents]) // len(sorted_contents) # [i] average length of the strings
-            
+
             if avg_length > MAX_FILENAME_LENGHT_GRID2:
                 avg_length = MAX_FILENAME_LENGHT_GRID2 # [i] let's cap this value
-                
+
             filebrowser_lines = [f"{sorted_contents[i]}{' ' * int(clamp(MAX_FILENAME_LENGHT_GRID2 // avg_length, 1, 10))}{sorted_contents[i + 1]}" for i in range(0, len(sorted_contents), 2)]
-            
-        # TODO
+
+        elif self._rendering_method == 'grid3':
+            # [i] stands for grid with 3 columns
+            avg_length: int = sum([len(i) for i in sorted_contents]) // len(sorted_contents) # [i] average length of the strings
+
+            if avg_length > MAX_FILENAME_LENGHT_GRID3:
+                avg_length = MAX_FILENAME_LENGHT_GRID3 # [i] let's cap this value
+
+            filebrowser_lines = [f"{sorted_contents[i]}{' ' * int(clamp(MAX_FILENAME_LENGHT_GRID3 // avg_length, 1, 5))}{sorted_contents[i + 1]}{' ' * int(clamp(MAX_FILENAME_LENGHT_GRID3 // avg_length, 1, 5))}{sorted_contents[i + 2]}" for i in range(0, len(sorted_contents), 3)]
+
+        else: # [i] default to list mode, which can be "list" or "centeredlist". for this step, both work exactly the same so fuck it
+            filebrowser_lines = sorted_contents
+
+        max_length: int = clamp(max([len(i) for i in filebrowser_lines]), 16, 7500) # [<] if it somehow reaches this number, please think about re-structuring your directories cuz HOLY SHIT!!!! That's literally 75% of 10000 
+
+        for index, value in enumerate(filebrowser_lines.copy(), 0):
+            if len(value) < max_length:
+                if self._rendering_method != 'centeredlist':
+                    filebrowser_lines[index] = f"{value}{' ' * (max_length - len(value))}"
+
+                else:
+                    filebrowser_lines[index] = value.center(max_length)
+
+            filebrowser_lines[index] = f"║ {value} ║" # [i] one space on either end will work :))
+
+        filebrowser_lines.insert(0, f'╔{"=" * (max_length + 2)}╗') # [i] the 2 spaces, remember?
+        filebrowser_lines.insert(1, f'╠ {" FileBrowser ".center(max_length, "-")} ╣') # [i] dashes makes it less compact than equal signs, which is good for subtitles
+        filebrowser_lines.append(f'╚{"=" * (max_length + 2)}╝') # [i] again the 2 bloody spaces... yeah, i had to say that. it was totally necessary
+        
+        # [i] alright I think that's everything for this function
+        return filebrowser_lines
 
     def get_quick_access_ready(self):
         # TODO
@@ -617,6 +649,9 @@ class FileBrowser(context.Context):
 
     def draw_to_screen(self):
         self.SCREEN.writelines(self._lines)
+        
+    def get_everything_ready(self):
+        raise NotImplementedError('TODO') # TODO
 
     def get_designation_based_on_element_type(self) -> dict[str, list[str]]:
         eggs = {'folder': [], 'file': [], "symlink": [], 'mountpoint': [], 'other': []}
@@ -642,6 +677,46 @@ class FileBrowser(context.Context):
 
         return eggs
 
-    def highlight_selection(self):
-        # TODO
-        raise NotImplementedError(self.__doc__)
+    def highlight_selection(self, sorted_list: list[str], **kw) -> list[str]:
+        """
+        ## FileBrowser.highlight_selection
+
+        Highlights the current selection, if possible. Otherwise, raises an error.  
+        
+        ### Test Mode
+        See `FileBrowser.highlight_selection.how_to_use_test_mode` for more information on the Test Mode.
+
+        :param list[str] sorted_list: The list of strings where the selection is.
+        :raises InvalidSelection: The selection index is out of range, therefore cannot be reached.
+        :return list[str]: The list, but with the selection highlighted.
+        """
+        
+        __test_mode = kw.pop('test_mode', False)
+        
+        if __test_mode:
+            try:
+                _ = sorted_list[self._selection]
+                
+            except IndexError:
+                # [<] '_' never got assigned, so we can just return False, no need to delete it (in fact it wouldn't even work)
+                return False # [i] test failed
+            
+            else:
+                del _
+                return True # [i] test passed
+            
+            return -1 # [i] safe barrier: if somehow nothing gets returned, we end with an unconclusive result. Again, most likely unnecessary but I don't like taking risks, sorry.
+                    
+        try:
+            sorted_list[self._selection] = f"{Fore.RESET}{Back.RESET}{set_effect(Effect.NEGATIVE)}{sorted_list[self._selection]}{set_effect(Effect.POSITIVE)}{Fore.RESET}{Back.RESET}" # [i] get rid of all the formatting, then apply the negative effect, then reset the formatting. taht why we have a good black on white (or a white on black if you're an epic nerd who has a terminal in light mode)
+        
+        except IndexError as e:
+            raise InvalidSelection("The selection index is out of range") from e
+        
+        return sorted_list
+    
+    highlight_selection.how_to_use_test_mode = """### Test Mode
+Test mode for this function completely changes how it works. Instead of highlighting, it tries to access the selection index.
+If it fails, it returns False. If it succeeds, it returns True. If it somehow returns nothing, it returns -1.    
+        
+To enable it, set the `test_mode` keyword argument to True. To keep this function simple, Test Mode was not documented on the docstring."""
