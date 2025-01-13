@@ -3,21 +3,26 @@ import keyboard
 
 
 class Context:
-    def __init__(self, screen, value: str, keyword_formatters: dict[str, Any] | Any = None, title: str | None = None) -> None:
+    def __init__(self, screen, settings, protocol_manager, value: str, keyword_formatters: dict[str, Any] | Any = None, title: str | None = None) -> None:
         self._VALUE: str = value
+        self._SETTINGS = settings
         self._TITLE = title
         self._BASESCREEN = screen
+        self._PROTOCOL_MANAGER = protocol_manager
         
         if not keyword_formatters:
             keyword_formatters = {}
         
         self._FORMATTERS: dict[str, Any] = keyword_formatters
     
-    def handle_input(self, input_key: int, value: str):
+    def handle_input(self, input_key: int, value: str) -> Any:
         return f"Value for input of ID #{input_key}: {value}" # [i] remember: 0 for shift, 1 for backslash or something like that
     
-    def handle_keypress(self, key: keyboard._Key):
+    def handle_keypress(self, key: keyboard._Key) -> Any:
         return f"Key {key} pressed."
+    
+    def handle_protocol(self, protocol, arguments: dict[str, Any]) -> Any:
+        return f"Protocol {protocol} was executed with {len(arguments)} arguments."
     
     def format(self) -> str:
         if self._VALUE.count('{') == 0 or self._VALUE.count('}') == 0:
@@ -34,7 +39,7 @@ class Context:
             
         self._BASESCREEN.read_input()
             
-    def run_operation(self, operation: str, *args, **kwargs):
+    def run_operation(self, operation: str, *args, **kwargs) -> str:
         return eval(f"{self}._VALUE.{operation}(*{args}, **{kwargs})")
     
     @property
