@@ -13,6 +13,36 @@ import hashlib
 from difflib import SequenceMatcher
 
 
+ASCII_ICONS = [
+    """██████▓▓
+██████▓▓▓▓
+██████▓▓▓▓▓▓
+████████████
+████████████
+████████████
+████████████""",
+       
+    """  ▅▅▅▅
+███████████████
+██▓▓▓▓▓▓▓▓▓▓▓▓██
+██▓▓▓▓▓███████████
+██▓▓▓███████████
+██▓███████████
+█████████████""",
+
+    """      ▇■■■■■■■■■■■■▇
+      █            █
+      █            █
+      █            █
+      █       ██████
+ ██████      ███████
+███████       █████
+ █████"""
+ 
+    # TODO: more icons to do
+]
+
+
 class InvalidSelection(Exception): ...
 
 
@@ -48,9 +78,9 @@ def curate_quick_access_list(quick_access_list: list[str], cwd: str) -> list[str
     for i in quick_access_list:
         if not test_path(i, cwd):
             indexes.append(quick_access_list.index(i))
-            
+
     indexes.sort(reverse=True)
-    
+
     for index in indexes:
         quick_access_list.pop(index)
 
@@ -680,10 +710,20 @@ class FileBrowser(context.Context):
 
         # [i] alright I think that's everything for this function
         return filebrowser_lines
+    
+    def get_details_ready(self):
+        # TODO: work on this
 
     def get_quick_access_ready(self):
         self._curated_list = curate_quick_access_list(self._quick_access_items.copy(), self._cur_dir)
-        # TODO: calculate height and all of that
+
+        if not self._curated_list:
+            # [i] if there are exactly 0 items, we'll add only one so the height calculation goes well
+            self._curated_list = [os.path.expanduser('~')]
+
+        # [i] the quick access will be left to the actual file browser itself and above the "details" field
+        
+        
 
     def draw_to_screen(self):
         self.SCREEN.writelines(self._lines)
