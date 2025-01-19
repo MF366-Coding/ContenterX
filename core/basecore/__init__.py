@@ -12,9 +12,12 @@ from NCapybaraLib.Math import clamp
 import hashlib
 from difflib import SequenceMatcher
 
+DIRECTORY = 1
+MEDIA = 2
+OTHER = 0
 
 ASCII_ICONS = [
-    """██████▓▓
+    """██████▓▓ # [i] files (any type of files that are not media)
 ██████▓▓▓▓
 ██████▓▓▓▓▓▓
 ████████████
@@ -22,7 +25,7 @@ ASCII_ICONS = [
 ████████████
 ████████████""",
        
-    """  ▅▅▅▅
+    """  ▅▅▅▅ # [i] directories
 ███████████████
 ██▓▓▓▓▓▓▓▓▓▓▓▓██
 ██▓▓▓▓▓███████████
@@ -30,7 +33,7 @@ ASCII_ICONS = [
 ██▓███████████
 █████████████""",
 
-    """      ▇■■■■■■■■■■■■▇
+    """      ▇■■■■■■■■■■■■▇ # [i] media (any type of it - can be videos, pictures, audio)
       █            █
       █            █
       █            █
@@ -38,8 +41,6 @@ ASCII_ICONS = [
  ██████      ███████
 ███████       █████
  █████"""
- 
-    # TODO: more icons to do
 ]
 
 
@@ -509,11 +510,15 @@ class FileBrowser(context.Context):
                                                                    # [<] now who the fuck thought these alias would be a good idea?
 
         # [*] Selection and current directory
+        self._old_selection = -1
         self._selection = 0
         self._cur_dir: str = os.getcwd()
 
         # [*] Quick Access
-        self._quick_access_items = self._SETTINGS['quickAccessPaths'] # [i] must be a
+        self._quick_access_items = self._SETTINGS['quickAccessPaths']
+        
+        # [*] Details Field
+        self._details = None 
 
         value = None
 
@@ -712,7 +717,9 @@ class FileBrowser(context.Context):
         return filebrowser_lines
     
     def get_details_ready(self):
-        # TODO: work on this
+        if self._old_selection == self._selection:
+            return self._details # [i] use the previously set details
+        
 
     def get_quick_access_ready(self):
         self._curated_list = curate_quick_access_list(self._quick_access_items.copy(), self._cur_dir)
