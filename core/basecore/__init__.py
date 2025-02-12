@@ -697,7 +697,7 @@ class FileBrowser(context.Context):
         else: # [i] default to list mode, which can be "list" or "centeredlist". for this step, both work exactly the same so fuck it
             filebrowser_lines = sorted_contents
 
-        max_length: int = clamp(max([len(i) for i in filebrowser_lines]), 16, 7500) # [<] if it somehow reaches this number, please think about re-structuring your directories cuz HOLY SHIT!!!! That's literally 75% of 10000
+        max_length: int = clamp(max([len(i) for i in filebrowser_lines[:len(filebrowser_lines) // 2]]), 16, 7500) # [<] if it somehow reaches this number, please think about re-structuring your directories cuz HOLY SHIT!!!! That's literally 75% of 10000
 
         for index, value in enumerate(filebrowser_lines.copy(), 0):
             if len(value) < max_length:
@@ -710,7 +710,7 @@ class FileBrowser(context.Context):
             filebrowser_lines[index] = f"║ {value} ║" # [i] one space on either end will work :))
 
         filebrowser_lines.insert(0, f'╔{"=" * (max_length + 2)}╗') # [i] the 2 spaces, remember?
-        filebrowser_lines.insert(1, f'╠ {" FileBrowser ".center(max_length, "-")} ╣') # [i] dashes makes it less compact than equal signs, which is good for subtitles
+        filebrowser_lines.insert(1, f'╠{" FileBrowser ".center(max_length, "-")}╣') # [i] dashes makes it less compact than equal signs, which is good for subtitles
         filebrowser_lines.append(f'╚{"=" * (max_length + 2)}╝') # [i] again the 2 bloody spaces... yeah, i had to say that. it was totally necessary
 
         # [i] alright I think that's everything for this function
@@ -719,19 +719,17 @@ class FileBrowser(context.Context):
     def get_details_ready(self):
         if self._old_selection == self._selection:
             return self._details # [i] use the previously set details
-        
 
-    def get_quick_access_ready(self):
+    def get_quick_access_ready(self) -> list[str]:        
         self._curated_list = curate_quick_access_list(self._quick_access_items.copy(), self._cur_dir)
 
         if not self._curated_list:
-            # [i] if there are exactly 0 items, we'll add only one so the height calculation goes well
-            self._curated_list = [os.path.expanduser('~')]
-
-        # [i] the quick access will be left to the actual file browser itself and above the "details" field
+            self._curated_list = [os.path.expanduser('~')] # [!?] fuck you for not using your quick access!! 
         
+        max_length: int = clamp(max([len(i) for i in self._curated_list]), 16, 70) # [<] if it somehow reaches this number, please think about re-structuring your directories cuz HOLY SHIT!!!! That's literally 75% of 10000
         
-
+        return [f"╔{"=" * (max_length + 2)}╗", f"╠{" Quick Access ".center(max_length, "-")}╣"] + self._curated_list + [f"╚{"=" * (max_length + 2)}╝"]
+        
     def draw_to_screen(self):
         self.SCREEN.writelines(self._lines)
 
@@ -791,7 +789,7 @@ class FileBrowser(context.Context):
                 del _
                 return True # [i] test passed
 
-            return -1 # [i] safe barrier: if somehow nothing gets returned, we end with an unconclusive result. Again, most likely unnecessary but I don't like taking risks, sorry.
+            return -1 # [i] safety barrier: if somehow nothing gets returned, we end with an unconclusive result. Again, most likely unnecessary but I don't like taking risks, sorry.
 
         try:
             sorted_list[self._selection] = f"{Fore.RESET}{Back.RESET}{set_effect(Effect.NEGATIVE)}{sorted_list[self._selection]}{set_effect(Effect.POSITIVE)}{Fore.RESET}{Back.RESET}" # [i] get rid of all the formatting, then apply the negative effect, then reset the formatting. taht why we have a good black on white (or a white on black if you're an epic nerd who has a terminal in light mode)
