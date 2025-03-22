@@ -61,12 +61,12 @@ class Repo:
         self._FULLNAME = f"{owner}/{name}"
         
         self._response = requests.get(f"https://api.github.com/repos/{owner}/{name}", timeout=1)
-        
+
         if self._response.status_code != 200:
             raise ConnectionError('status code is not 200')
-        
+
         self._data: dict[str, str | int | bool | None] = self._response.json()
-        
+
     def clone(self, directory: str, method: str = 'https'):
         os.chdir(directory)
         
@@ -80,41 +80,46 @@ class Repo:
                 return
     
     def calculate_trust_level(self):
-        downloads_resp = requests.get(self._data['releases_url'], timeout=1)
-        
-        download_score = 0
-        
-        last_pushed = datetime.strptime(self._data['pushed_at'], '%Y-%m-%dT%H:%M:%SZ')
-        days_since_last_push = (datetime.now() - last_pushed).days
-        push_score: int = 0
-        
-        if days_since_last_push <= 40:
-            push_score = int(days_since_last_push)
-            
-        else:
-            push_score = 1
-        
-        assets = None
-        
-        try:
-            assets: dict[str, dict] = downloads_resp.json()["0"]['assets']
-        
-        except KeyError:
-            download_score = 1
-        
-        if not download_score:
-            downloads = 0
-            
-            for k in assets.keys():
-                downloads += assets[k]['download_count']
-                
-            download_score = math.log(downloads + 1)
-    
-        final_score = (((self._data['stargazers_count'] + self._data['watchers_count']) + (self._data['forks_count'] * 2)) * ((download_score + push_score) / 2)) # type: ignore
-        
-        percentage = min((final_score / 40000) * 100, 100)
+        # [*] Activity Score (time since last pushed & issue responsiveness)
+        # [i] Time since last pushed
+        delta_days_weight = 0.4
+        issue_resp_weight = 0.6
 
-        return round(percentage, 2)
+        last_push_date = datetime.strptime(self._data['pushed_at'], "%Y-%m-%dT%H:%M:%SZ")
+        days_since_last_pushed = (datetime.utcnow() - last_push_date).days
+
+        open_issues = self._data['open_issues_count']
+        closed_issues: int = 0
+        url = f"{self._data['issues_url']}?state=closed"
+        has_looped = 0
+
+        while url:
+            if has_looped > 4:
+                break
+
+            response = requests.get(url)
+
+            closed_issues += len(response.json())
+            has_looped += 1
+            url = response.links.get('next', {}).get('url')
+
+        url = f"{self._data['pulls_url']}?state=closed"
+
+        has_looped = 0
+
+        while url:
+            if has_looped > 4:
+                break
+
+            response = requests.get(url)
+
+            closed_issues -= len(response.json())
+            has_looped += 1
+            url = response.links.get('next', {}).get('url')
+
+        issue_responsiveness = int(closed_issues / (closed_issues + open_issues)) # types: ignore
+
+        return round((issue_responsiveness * issue_resp_weight) + ((60 / max(days_since_last_pushed + 1, 60)) * delta_days_weight), 2)
 
 if __name__ == '__main__':
     test_a = Repo('MF366-Coding', "WriterClassic")
@@ -122,3 +127,6 @@ if __name__ == '__main__':
     
     test_b = Repo('id-Software', "DOOM")
     print(test_b.calculate_trust_level())
+
+    test_c = Repo('torvalds', "linux")
+    print(test_c.calculate_trust_level())
