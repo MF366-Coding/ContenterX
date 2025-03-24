@@ -16,7 +16,7 @@ WEIGHTS = {
 }
 
 LICENSE_CLASSIFICATION = {
-    # Very Permissive
+    # [*] Very Permissive
     "MIT": 1.0,
     "Apache-2.0": 1.0,
     "BSD-2-Clause": 1.0,
@@ -28,11 +28,11 @@ LICENSE_CLASSIFICATION = {
     "Zlib": 1.0,
     "ISC": 1.0,
 
-    # Permissive with minor restrictions
+    # [*] Permissive with minor restrictions
     "BSD-3-Clause": 0.9,
     "ECL-2.0": 0.9,
 
-    # Neutral (Attribution, Non-commercial)
+    # [*] Neutral (Attribution, Non-commercial)
     "CC-BY-4.0": 0.7,
     "CC-BY-SA-4.0": 0.7,
     "CC-BY-NC-4.0": 0.7,
@@ -40,22 +40,22 @@ LICENSE_CLASSIFICATION = {
     "EPL-1.0": 0.7,
     "EPL-2.0": 0.7,
 
-    # Copyleft (even weaker)
+    # [*] Copyleft (even weaker)
     "LGPL-3.0": 0.6,
     "LGPL-2.1": 0.6,
 
-    # Copyleft (weaker)
+    # [*] Copyleft (weaker)
     "GPL-3.0": 0.4,
     "GPL-3.0-only": 0.4,
     "GPL-3.0-or-later": 0.4,
 
-    # Stronger Copyleft (Network use, etc.)
+    # [*] Stronger Copyleft (Network use, etc.)
     "AGPL-3.0": 0.3,
     "GPL-2.0-only": 0.2,
     "GPL-2.0-or-later": 0.2,
     "GPL-2.0": 0.2,
 
-    # Other recognized licenses
+    # [*] Other recognized licenses
     "ECL-1.0": 0.9,
     "EUPL-1.2": 0.7,
     "NCSA": 1.0,
@@ -102,6 +102,13 @@ class Repo:
             'open': -1
         }
         self._followers = -1
+        
+    @property
+    def is_contenterx_package(self):
+        url = "https://raw.githubusercontent.com/MF366-Coding/WriterClassic/refs/heads/main/contenterx/setup.cx"
+        response = requests.get(url, timeout=1)
+        
+        return (response.status_code == 200)
 
     def clone(self, directory: str, method: str = 'https'):
         os.chdir(directory)
@@ -167,7 +174,7 @@ class Repo:
             self._contributors = self.fetch_contributor_count()
 
         has_contributors = (self._contributors >= 7500)
-        has_forks = (self._data.get('forks', 1) >= 10000)
+        has_forks = (self._data.get('forks_count', self._data.get('forks', 1)) >= 10000) # type: ignore
 
         return (is_legacy and has_contributors and has_forks)
 
@@ -211,7 +218,7 @@ class Repo:
             issue_responsiveness = 0
 
         else:
-            issue_responsiveness = (1 - (self._data['open_issues_count'] / self._most_recent_issue['all'])) * 100
+            issue_responsiveness = (1 - (self._data['open_issues_count'] / self._most_recent_issue['all'])) * 100 # type: ignore
 
         if self._contributors == -1:
             self._contributors = self.fetch_contributor_count(multiplier=11) # [i] smol extra boost? :eyes:
