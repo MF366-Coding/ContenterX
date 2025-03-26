@@ -2,3 +2,5 @@
 __pycache__
 .ruff_cache
 .vscode
+relation.png
+test*.py
