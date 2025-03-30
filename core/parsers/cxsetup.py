@@ -10,14 +10,41 @@ Thank you!
 
 
 from enum import IntEnum
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 import struct
+import subprocess
 import re
 from colorama import Fore, Back, Style
 
 
 class CacheOverflow(Exception): ...
 
+
+SOURCE_CONVTABLE = [
+    "system", "cx", "pip", "npm", "binary"
+]
+
+
+class FlagMarker:
+    def __init__(self, on_true, state: bool = False, on_false = None):
+        self._state = state
+        self._on_true = on_true
+        self._on_false = on_false
+        
+    def toggle(self):
+        self._state: bool = not self._state
+        
+        match self._state:
+            case False:
+                if self._on_false is not None:
+                    self._on_false()
+            
+            case True:
+                self._on_true()
+                
+            case _:
+                raise Exception('flag marker is not working correctly')
+        
 
 class char(object):
     def __init__(self, byte: bytes) -> None:
@@ -151,13 +178,17 @@ class DataType(IntEnum):
 
 
 class Cache:
-    def __init__(self, reserved_bytes: int):
+    def __init__(self, reserved_bytes: int) -> None:
         self.cache = bytearray(reserved_bytes)
-        self._RESERVED = reserved_bytes
+        self._RESERVED: int = reserved_bytes
+        self._pointer = 0
+        
+    def clear(self) -> None:
+        self.cache = bytearray(self._RESERVED)
         self._pointer = 0
 
-    def __len__(self):
-        length = len(self.cache)
+    def __len__(self) -> int:
+        length: int = len(self.cache)
 
         if length > self._RESERVED:
             raise CacheOverflow(f"the cache is taking up {self._RESERVED - length} byte(s) more than it should")
@@ -167,7 +198,7 @@ class Cache:
     def __str__(self) -> str:
         return str(bytes(self.cache.copy()), 'utf-8')
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__str__()
 
     def get_cache(self, pos: int, len: int = -2, end: int = -2, step: int = 1) -> bytes:
@@ -224,13 +255,13 @@ class Cache:
 
                 return parsed_integer
 
-            case DataType.CHAR | DataType.STRING:
+            case DataType.CHAR:
                 parsed_char = char(cached_bytes)
-
-                if data_type == DataType.STRING:
-                    return parsed_char.ToEncodedString()
-
                 return parsed_char
+            
+            case DataType.STRING:
+                parsed_string = str(cached_bytes, 'utf-8')
+                return parsed_string
 
             case DataType.FLOAT:
                 return struct.unpack('>f', cached_bytes)[0]
@@ -332,20 +363,42 @@ class Cache:
         
         self.cache[self._pointer] = data[0]
         return 0 # [i] no more data
+    
+    @property
+    def reserved_bytes(self) -> int:
+        return self._RESERVED
+
+
+class RequirementSource(IntEnum):
+    SYSTEM = 0
+    CX = 1
+    PIP = 2
+    NPM = 3
+    BINARY = 4
 
 
 class Interpreter:
-    def __init__(self, script: str, cache_bytes: int):
-        self._cache = Cache(cache_bytes)
-        self.line = 1
+    def __init__(self, script: str, cache_bytes: int, flag_marker: FlagMarker) -> None:
+        self._cache: Cache = Cache(cache_bytes)
+        self._flag_marker: FlagMarker = flag_marker
+        self.statement = 0
+        self.InterpreterRunning = False
+        self._script: str = script
+        self._requirements: dict[str, list[str]] = {
+            "system": [],
+            "cx": [],
+            "pip": [],
+            "npm": [],
+            "binary": []
+        }
 
-    def cout(self, *data: str) -> Literal[1]:
+    def cout(self, *data: str) -> Literal[0]:
         print(*data, sep='\n')
         return 0
-
+    
     def cin(self) -> str | Literal[1]:
         print(f'{Back.CYAN}{Fore.BLACK}An input is required (press Enter to ignore it): {Style.RESET_ALL}', end='')
-        data = input()
+        data: str = input()
         print('\n')
 
         if not data:
@@ -354,26 +407,192 @@ class Interpreter:
         self._cache.set_cache(data)
         return data
 
-    def raise_error(self, error: BaseException = Exception, msg: str = ''):
-        raise error(f"line {self.line}: {msg}")
+    def raise_error(self, error: BaseException = Exception, message: str = '') -> NoReturn:
+        raise error(f"statement {self.statement + 1}: {message}")
 
-    def handle_cache_grab(self, declaration: str):
+    def handle_cache_grab(self, declaration: str) -> bytes | bool | int | str | char | float:
         # [i] It'll look something like this "c0:2l:4:3" or "c0:2e:4:3"
         # [*] Let's use regex
         PATTERN = "c[0-9]+:[0-9]+[el]:[0-9]+:[0-9]+"
-        match = re.match(PATTERN, declaration)
+        match: re.Match[str] | None = re.match(PATTERN, declaration)
+        
+        if not match:
+            return -69 # [i] magic number verification LMFAO
 
-        parsed_declaration = declaration[match.start():match.end()] # [i] the only part that matters
+        parsed_declaration: str = declaration[match.start():match.end()] # [i] the only part that matters
 
         # [*] Is it actually a valid declaration?
-        arguments = parsed_declaration[1:].split(':')
+        arguments: list[str] = parsed_declaration[1:].split(':')
 
         # [*] First argument: integer
         if int(arguments[0]) >= self._cache.reserved_bytes - 1:
             self.raise_error(CacheOverflow, "trying to cache grab more than it's possible to")
 
         # [*] Second argument: integer + literal
-        second_arg = arguments[1][:len(arguments[1]) - 1]
-        arg_literal = arguments[1][-1]
+        second_arg: int = int(arguments[1][:len(arguments[1]) - 1])
+        arg_literal: str = arguments[1][-1]
 
-        # TODO
+        match arg_literal:
+            case 'l':
+                if second_arg < 1:
+                    self.raise_error(ValueError, "make sure the lenght argument is an integer larger than 0")
+                
+                if int(arguments[0]) + second_arg > self._cache.reserved_bytes:
+                    self.raise_error(CacheOverflow, "the given lenght is larger than the amount of bytes reserved for the cache - consider doing step-by-step cache grabs")
+                    
+            case 'e':
+                if not second_arg:
+                    second_arg = -1
+                    
+                elif second_arg > self._cache.reserved_bytes:
+                    self.raise_error(CacheOverflow, "the given end value exceeds the amount of bytes reserved for the cache")
+                
+            case _:
+                self.raise_error("unknown error") # [i] technically will never happen cuz of the regex check but oh well
+            
+        # [*] Third argument: integer
+        third_arg: int = -1 if not int(arguments[2]) else int(arguments[2])
+        
+        # [*] Fourth argument: DataType integer
+        fourth_arg: int = int(arguments[3])
+        
+        if int(fourth_arg) == DataType.VOID:
+            self.raise_error(TypeError, "cannot do a cache grab for a VOID data type")
+            
+        if int(fourth_arg) >= DataType.GARBAGE:
+            fourth_arg = DataType.GARBAGE
+            
+        # [*] Actual cache grab
+        cache_data: bytes = self._cache.get_cache(int(arguments[0]), second_arg if arg_literal == 'l' else -2, second_arg if arg_literal == 'e' else -2, third_arg)
+        parsed_cache: bytes | bool | int | str | char | float = self._cache.readable_cache(cache_data, fourth_arg)
+        
+        return parsed_cache
+    
+    def handle_requirement(self, source: int, arg: str) -> Literal[0]:
+        if source < 0:
+            self.raise_error(ValueError, "the source must be a positive integer or zero")
+            
+        if source > 4:
+            self.raise_error(ValueError, "only 5 sources are accounted for, starting at 0, ending at 4")
+            
+        if not arg:
+            self.raise_error(ValueError, "you must include a valid requirement to install from the source")
+            
+        self._requirements[SOURCE_CONVTABLE[source]].append(arg)
+        return 0
+    
+    def run(self, command: str, *arguments: str, capture_output: bool = False, text: bool = True) -> subprocess.CompletedProcess[Any] | None:
+        result: subprocess.CompletedProcess[Any] = subprocess.run([command, *arguments], capture_output=capture_output, text=text)
+        return result
+    
+    def save_to_cache(self, value: str | int | float) -> Literal[0]:
+        self._cache.set_cache(value)
+        return 0
+    
+    def clear_cache(self) -> None:
+        self._cache.clear()
+    
+    def handle_statement(self, statement: str):
+        parts: list[str] = statement.split('??')
+        func: str = parts[0]
+        arguments: list[str] = parts[1:]
+        
+        args: list[str] = []        
+        func = func.rstrip()
+        
+        for arg in arguments:
+            parsed_arg: str = arg.strip()
+            
+            if re.match('[0-9]+', parsed_arg):
+                # [i] data type: integer
+                args.append(int(parsed_arg))
+                continue
+                
+            if parsed_arg.count('.') == 1:
+                # [i] data type: float
+                int_part, float_part = parsed_arg.split('.')
+                
+                if re.match('[0-9]+', int_part) and re.match('[0-9]+', float_part):
+                    args.append(float(parsed_arg))
+                    continue
+                    
+            if parsed_arg.startswith('"') and parsed_arg.endswith('"') and parsed_arg.count('"') == 2:
+                # [i] data type: string or char
+                if len(parsed_arg) == 3:
+                    # [i] char
+                    args.append(char.from_string(parsed_arg))
+                    continue
+                
+                args.append(parsed_arg)
+                continue
+            
+            # [*] Last case scenario: maybe it's a cache grab declaration
+            cgrab: bytes | bool | int | str | char | float = self.handle_cache_grab(parsed_arg)
+            
+            if cgrab != -69:
+                args.append(cgrab)
+                continue
+            
+            self.raise_error(TypeError, f'argument must be string, char, int or float - {parsed_arg}')
+        
+        del arguments
+        
+        match func:
+            case 'COUT':
+                self.cout(*args)
+                
+            case 'CIN':
+                if args:
+                    self.raise_error(SyntaxError, f"0 arguments were expected, but {len(args)} arguments were received")
+                    
+                self.cin()
+            
+            case 'TERMINATE':
+                self.InterpreterRunning = False
+                
+            case 'REQUIRES':
+                if len(args) != 2:
+                    self.raise_error(SyntaxError, f"2 arguments were expected, but {len(args)} arguments were received")
+                
+                self.handle_requirement(args[0], args[1])
+                
+            case 'REQINSTALL':
+                if args:
+                    self.raise_error(SyntaxError, f"0 arguments were expected, but {len(args)} arguments were received")
+                
+                self.install_requirements()
+                
+            # TODO
+            
+    
+    def install_requirements(self) -> Literal[0]:
+        self._flag_marker.toggle() # [i] this will trigger ContenterX requirement installation
+        return 0
+    
+    def init(self) -> Literal[0]:        
+        raw_lines: list[str] = self._script.split('\n')
+        parsed_script: str = ''
+        
+        for line in raw_lines:
+            trimmed_line: str = line.strip()
+            
+            if not trimmed_line:
+                continue
+            
+            if trimmed_line.startswith(('//', '#')):
+                continue
+            
+            parsed_script += trimmed_line
+            
+        del raw_lines
+        
+        statements: list[str] = parsed_script.split(';')
+        
+        self.InterpreterRunning = True
+        self.statement = 0
+        
+        while self.InterpreterRunning:
+            self.handle_statement(statements[self.statement])
+            self.statement += 1
+            
+        return 0
