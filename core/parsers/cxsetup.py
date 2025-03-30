@@ -12,6 +12,8 @@ Thank you!
 from enum import IntEnum
 from typing import Any, Literal
 import struct
+import re
+from colorama import Fore, Back, Style
 
 
 class CacheOverflow(Exception): ...
@@ -215,7 +217,7 @@ class Cache:
 
         match data_type:
             case DataType.INTEGER | DataType.BOOLEAN:
-                parsed_integer = int.from_bytes(cached_bytes, byteorder='big', signed=True)
+                parsed_integer = int.from_bytes(cached_bytes, byteorder='big')
 
                 if data_type == DataType.BOOLEAN:
                     return parsed_integer != 0
@@ -323,7 +325,7 @@ class Cache:
             self.cache[self._pointer] = float_bytes[0]
             return self.set_cache(float_bytes[1:], allow_overwrite)
         
-        # [*] If nothing worked ut, it's bytes
+        # [*] If nothing worked out, it's bytes
         if len(data) > 1:
             self.cache[self._pointer] = data[0]
             return self.set_cache(data[1:], allow_overwrite)
@@ -331,4 +333,47 @@ class Cache:
         self.cache[self._pointer] = data[0]
         return 0 # [i] no more data
 
-# TODO
+
+class Interpreter:
+    def __init__(self, script: str, cache_bytes: int):
+        self._cache = Cache(cache_bytes)
+        self.line = 1
+
+    def cout(self, *data: str) -> Literal[1]:
+        print(*data, sep='\n')
+        return 0
+
+    def cin(self) -> str | Literal[1]:
+        print(f'{Back.CYAN}{Fore.BLACK}An input is required (press Enter to ignore it): {Style.RESET_ALL}', end='')
+        data = input()
+        print('\n')
+
+        if not data:
+            return 1 # [!?] no data given
+
+        self._cache.set_cache(data)
+        return data
+
+    def raise_error(self, error: BaseException = Exception, msg: str = ''):
+        raise error(f"line {self.line}: {msg}")
+
+    def handle_cache_grab(self, declaration: str):
+        # [i] It'll look something like this "c0:2l:4:3" or "c0:2e:4:3"
+        # [*] Let's use regex
+        PATTERN = "c[0-9]+:[0-9]+[el]:[0-9]+:[0-9]+"
+        match = re.match(PATTERN, declaration)
+
+        parsed_declaration = declaration[match.start():match.end()] # [i] the only part that matters
+
+        # [*] Is it actually a valid declaration?
+        arguments = parsed_declaration[1:].split(':')
+
+        # [*] First argument: integer
+        if int(arguments[0]) >= self._cache.reserved_bytes - 1:
+            self.raise_error(CacheOverflow, "trying to cache grab more than it's possible to")
+
+        # [*] Second argument: integer + literal
+        second_arg = arguments[1][:len(arguments[1]) - 1]
+        arg_literal = arguments[1][-1]
+
+        # TODO
