@@ -244,8 +244,8 @@ class Cache:
         :return bytes | bool | int | str | char | float | Any: the parsed data
         """
 
-        if data_type >= 6:
-            return bytes(cached_bytes.copy())
+        if data_type >= DataType.GARBAGE:
+            return bytes(cached_bytes)
 
         match data_type:
             case DataType.INTEGER | DataType.BOOLEAN:
@@ -257,11 +257,21 @@ class Cache:
                 return parsed_integer
 
             case DataType.CHAR:
-                parsed_char = char(cached_bytes)
-                return parsed_char
+                try:
+                    parsed_char = str(cached_bytes[0], 'utf-8')
+
+                except UnicodeError:
+                    parsed_char = str(int.from_bytes(cached_bytes[0], byteorder='big'))
+
+                return char.FromString(parsed_char)
 
             case DataType.STRING:
-                parsed_string = str(cached_bytes, 'utf-8')
+                try:
+                    parsed_string = str(cached_bytes, 'utf-8')
+
+                except UnicodeError:
+                    parsed_string = str(int.from_bytes(cached_bytes, byteorder='big'))
+
                 return parsed_string
 
             case DataType.FLOAT:
@@ -270,7 +280,14 @@ class Cache:
             case _:
                 raise TypeError('type is not valid')
 
-    def set_cache(self, data: bytes | bool | int | str | float, allow_overwrite: bool = True) -> Literal[0]:
+    def _advance_pointer(self):
+        if self._pointer >= (self._RESERVED - 1):
+            self._pointer = 0
+
+        else:
+            self._pointer += 1
+
+    def set_cache(self, data: bytes | bool | int | str | float) -> Literal[0]:
         """
         Cache.set_cache
         ----------------
@@ -278,7 +295,6 @@ class Cache:
         Caches a value, which can be of types `int`, `bool`, `float`, `str`, `char` (via string) or `bytes`
 
         :param bytes | bool | int | str | float data: the data to cache
-        :param bool allow_overwrite: allows for data to be overwritten by pointer iterations, defaults to True
         :raises CacheOverflow: the storage for the cache has been exhausted
         :return Literal[0]: success code
         """
@@ -286,25 +302,10 @@ class Cache:
         if not data:
             return 0 # [i] no more data
 
-        if self._pointer >= self._RESERVED:
-            if allow_overwrite:
-                self._pointer = 0 # [i] loop back to 0 and start overwriting previous shit
-                                    # [<] cuz I don't give a fuck tbh
-
-            else:
-                if 0x0 in self.cache:
-                    first_empty_slot = self.cache.index(0x0)
-                    self._pointer = first_empty_slot
-
-                else:
-                    raise CacheOverflow('cache storage has been exhausted')
-
-        else:
-            self._pointer += 1
-
         if isinstance(data, bool):
             # [*] Instantly set the cache for that, as it's either a 0 or a 1
-            self.cache[self._pointer] = data.to_bytes(1, 'big')
+            self.cache[self._pointer] = data.to_bytes(1, 'big')[0]
+            self._advance_pointer()
             return 0 # [i] no more data
 
         if isinstance(data, int):
@@ -313,9 +314,11 @@ class Cache:
                 # [*] Split the beast into multiple bytes
                 int_bytes: bytes = data.to_bytes((data.bit_length() + 7) // 8, byteorder='big')
                 self.cache[self._pointer] = int_bytes[0]
-                return self.set_cache(int_bytes[1:], allow_overwrite) # [i] more data to go buddy
+                self._advance_pointer()
+                return self.set_cache(int_bytes[1:]) # [i] more data to go buddy
 
-            self.cache[self._pointer] = data.to_bytes(1, 'big') # [i] will always "fit" into 1 byte exactly
+            self.cache[self._pointer] = data.to_bytes(1, 'big')[0] # [i] will always "fit" into 1 byte exactly
+            self._advance_pointer()
             return 0 # [i] no more data
 
         if isinstance(data, str):
@@ -330,39 +333,32 @@ class Cache:
                 CHAR = False
                 first_char = data[0]
 
-            self.cache[self._pointer] = char.FromString(first_char).AsBytes()
-
             if CHAR:
-                return 0 # [i] no more data
+                self.cache[self._pointer] = bytes(first_char, 'utf-8')[0]
+                self._advance_pointer()
+                return 0
 
-            return self.set_cache(data[1:], allow_overwrite)
+            self.cache[self._pointer] = bytes(first_char, 'utf-8')[0]
+            self._advance_pointer()
+            return self.set_cache(data[1:])
 
         if isinstance(data, float):
-            # [?] Does it represent an integer??
-                # [<] If yes, we're gonna do a bit of black magic.
-                # [i] Basically, we're gonna treat it as an integer so we're gonna
-                # [i] call the function again but with an integer instead of the float
-                # [i] The only issue is that the pointer will increment TWICE
-                # [*] Solution: decrement the pointer
             if int(data) == data:
-                if self._pointer <= 0:
-                    self._pointer: int = self._RESERVED - 1
-
-                else:
-                    self._pointer -= 1
-
-                return self.set_cache(int(data), allow_overwrite)
+                return self.set_cache(int(data))
 
             float_bytes: bytes = struct.pack('>f', data)
             self.cache[self._pointer] = float_bytes[0]
-            return self.set_cache(float_bytes[1:], allow_overwrite)
+            self._advance_pointer()
+            return self.set_cache(float_bytes[1:])
 
         # [*] If nothing worked out, it's bytes
         if len(data) > 1:
             self.cache[self._pointer] = data[0]
-            return self.set_cache(data[1:], allow_overwrite)
+            self._advance_pointer()
+            return self.set_cache(data[1:])
 
         self.cache[self._pointer] = data[0]
+        self._advance_pointer()
         return 0 # [i] no more data
 
     @property
@@ -379,9 +375,12 @@ class RequirementSource(IntEnum):
 
 
 class Interpreter:
-    def __init__(self, script: str, cache_bytes: int, flag_marker: FlagMarker) -> None:
+    def __init__(self, script: str, cache_bytes: int, flag_marker: FlagMarker, pkg_command: str, pip_path: str = 'pip', npm_path: str = 'npm') -> None:
         self._cache: Cache = Cache(cache_bytes)
         self._flag_marker: FlagMarker = flag_marker
+        self._pippath: str = pip_path
+        self._npmpath: str = npm_path
+        self._pkgcmd: str = pkg_command
         self._cwd = os.getcwd()
         self.statement = 0
         self.InterpreterRunning = False
@@ -576,7 +575,7 @@ class Interpreter:
                     args.append(char.from_string(parsed_arg))
                     continue
 
-                args.append(parsed_arg)
+                args.append(parsed_arg[1:-1])
                 continue
 
             # [*] Last case scenario: maybe it's a cache grab declaration
@@ -605,7 +604,7 @@ class Interpreter:
                     self.raise_error(SyntaxError, f"1 or no arguments were expected, but {len(args)} arguments were received")
 
                 elif len(args) < 1:
-                    args = (0)
+                    args = [0]
 
                 user_input: str | Literal[1] = self.cin(args[0])
 
@@ -685,7 +684,60 @@ class Interpreter:
     
                 self.full_echo(*args)
                 
-            # TODO
+            case 'SAFECIN': # [<] cin is mid, use this instead
+                if len(args) != 1:
+                    self.raise_error(SyntaxError, f"1 argument was expected, but {len(args)} arguments were received")
+
+                user_input: str | Literal[1] = self.cin(args[0])
+
+                while user_input == -1:
+                    print(f"{Fore.RED}Please give a correct input.{Fore.RESET}")
+                    user_input = self.cin(args[0])
+
+                if len(user_input) < args[0]:
+                    user_input = f'{user_input}{" " * (args[0] - len(user_input))}'[:args[0] + 1]
+
+                self._cache.set_cache(user_input) # [i] it's a safe sin, I MEAN, cin eh eh
+
+            case 'YAYORNAY': # [i] a bit like a modified cin or sorts
+                if args:
+                    self.raise_error(SyntaxError, f"0 arguments were expected, but {len(args)} arguments were received")
+
+                user_input: str | Literal[1] = self.cin(1)
+
+                while user_input not in ('y', 'n'):
+                    print(f"{Fore.RED}Please give a correct input (only 'y' and 'n' are allowed).{Fore.RESET}")
+                    user_input = self.cin(1)
+
+                self._cache.set_cache(user_input[0])
+
+            case 'RUN':
+                if not args:
+                    self.raise_error(SyntaxError, '1 or more arguments were expected, but none were received')
+
+                if len(args) > 1:
+                    self.run(args[0], *args[1:])
+
+                else:
+                    self.run(args[0])
+
+            case 'PKGRUN':
+                if not args:
+                    self.raise_error(SyntaxError, '1 or more arguments were expected, but none were received')
+
+                self.run(self._pkgcmd, *args)
+
+            case 'PIPRUN':
+                if not args:
+                    self.raise_error(SyntaxError, '1 or more arguments were expected, but none were received')
+
+                self.run(self._pippath, *args)
+
+            case 'NPMRUN':
+                if not args:
+                    self.raise_error(SyntaxError, '1 or more arguments were expected, but none were received')
+
+                self.run(self._npmpath, *args)
 
     def install_requirements(self) -> Literal[0]:
         self._flag_marker.toggle() # [i] this will trigger ContenterX requirement installation
@@ -714,7 +766,13 @@ class Interpreter:
         self.statement = 0
 
         while self.InterpreterRunning:
-            self.handle_statement(statements[self.statement])
+            try:
+                self.handle_statement(statements[self.statement])
+
+            except IndexError:
+                break # [i] we're done here!
+
             self.statement += 1
+            self._cwd = os.getcwd()
 
         return 0
