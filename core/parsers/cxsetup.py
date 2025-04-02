@@ -408,7 +408,7 @@ class Interpreter:
         # [i] my plan was to use curses but shit's broken af so instead I'll just slice
         # [i] by the limit. shitty approach but oh well
         if limit > 0:
-            return data[:limit + 1]
+            return data[:limit]
 
         return data
 
@@ -690,7 +690,7 @@ class Interpreter:
 
                 user_input: str | Literal[1] = self.cin(args[0])
 
-                while user_input == -1:
+                while user_input == 1:
                     print(f"{Fore.RED}Please give a correct input.{Fore.RESET}")
                     user_input = self.cin(args[0])
 
