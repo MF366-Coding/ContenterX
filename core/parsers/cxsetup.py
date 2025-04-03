@@ -591,7 +591,7 @@ class Interpreter:
                 # [i] data type: string or char
                 if len(parsed_arg) == 3:
                     # [i] char
-                    args.append(char.from_string(parsed_arg))
+                    args.append(char.from_string(parsed_arg[1:-1]))
                     continue
 
                 args.append(parsed_arg[1:-1])
@@ -623,7 +623,7 @@ class Interpreter:
                 
                 if user_input:
                     self.save_to_cache(user_input)
-            
+
             case 'COUT':
                 self.cout(*args)
 
@@ -845,10 +845,11 @@ def _local_req_inst(_i: Interpreter, pip: str, npm: str, pkg: str, cx: str, pkg_
         print(f'{Fore.BLUE}▻ Fetching data...{Fore.RESET}')
         
         try:
-            response: requests.Response = requests.get(requirement, timeout=1.5, allow_redirects=False)
+            response: requests.Response = requests.get(requirement, timeout=1.5)# /-/ , allow_redirects=False)
+            response.raise_for_status()
             
         except Exception as e:
-            print(f'{Fore.RED}⌦ Could not fetch data.{Fore.RESET} Moving on to the next requirement...')
+            print(f'{Fore.RED}⌦ Could not fetch data.{Fore.RESET} Moving on to the next requirement: {e}...')
             continue
         
         else:
@@ -863,7 +864,7 @@ def _local_req_inst(_i: Interpreter, pip: str, npm: str, pkg: str, cx: str, pkg_
                 f.write(response.content)
                 
         except Exception as e:
-            print(f'{Fore.RED}⌦ Could not finish writing to the path above.{Fore.RESET} Error details: {e}')
+            print(f'{Fore.RED}⌦  Could not finish writing to the path above.{Fore.RESET} Error details: {e}')
             continue
         
         print(f"{Fore.GREEN}✓ Finish writing to '{path}'!\n✓ Installation of {os.path.basename(path)} was successful!{Fore.RESET}\n\n")
