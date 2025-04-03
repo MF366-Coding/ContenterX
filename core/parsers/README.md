@@ -14,6 +14,7 @@ Copyright (c) 2025 MF366
 TODO
 
 Parser at: cxsetup.py
+Test script (also licensed under the MIT License) at: cxtest.py
 
 ---------------------------------------------------------------------------------------------------------------------------------------------------------
 

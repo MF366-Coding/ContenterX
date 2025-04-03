@@ -10,18 +10,22 @@ Thank you!
 
 
 from enum import IntEnum
+from argparse import ArgumentParser
 import os
 from typing import Any, Literal, NoReturn
 import struct
 import subprocess
+from getpass import getpass
+from cxconst import VERSION, NAME, AUTHOR, LICENSE, YEAR, GITHUB, DOCS_URL
 import re
 from colorama import Fore, Back, Style
+import requests
 
 
 class CacheOverflow(Exception): ...
 
 
-SOURCE_CONVTABLE = [
+SOURCE_CONVTABLE: list[str] = [
     "system", "cx", "pip", "npm", "binary"
 ]
 
@@ -394,13 +398,12 @@ class Interpreter:
         }
 
     def cout(self, *data: str) -> Literal[0]:
-        print(*data, sep='\n')
+        print(*data, sep='', end='')
         return 0
 
-    def cin(self, limit: int = -1) -> str | Literal[1]:
-        print(f'{Back.CYAN}{Fore.BLACK}An input is required (press Enter to ignore it): {Style.RESET_ALL}', end='')
+    def cin(self, limit: int = -1, *, msg: str = f'{Fore.CYAN}An input is required (press Enter to ignore it): {Fore.RESET}') -> str | Literal[1]:
+        print(msg, end='')
         data: str = input()
-        print('\n')
 
         if not data:
             return 1 # [!?] no data given
@@ -468,7 +471,7 @@ class Interpreter:
     def handle_cache_grab(self, declaration: str) -> bytes | bool | int | str | char | float:
         # [i] It'll look something like this "c0:2l:4:3" or "c0:2e:4:3"
         # [*] Let's use regex
-        PATTERN = "c[0-9]+:[0-9]+[el]:[0-9]+:[0-9]+"
+        PATTERN = "c[0-9]+:[0-9]+[el]:[0-9]+:[0-9]+:[rlbn]"
         match: re.Match[str] | None = re.match(PATTERN, declaration)
 
         if not match:
@@ -516,11 +519,27 @@ class Interpreter:
 
         if int(fourth_arg) >= DataType.GARBAGE:
             fourth_arg = DataType.GARBAGE
+            
+        # [*] Fifth argument: char
+        fifth_arg = arguments[4][0]
 
         # [*] Actual cache grab
         cache_data: bytes = self._cache.get_cache(int(arguments[0]), second_arg if arg_literal == 'l' else -2, second_arg if arg_literal == 'e' else -2, third_arg)
         parsed_cache: bytes | bool | int | str | char | float = self._cache.readable_cache(cache_data, fourth_arg)
 
+        match fifth_arg:
+            case 'b':
+                parsed_cache = parsed_cache.strip()
+                
+            case 'r':
+                parsed_cache = parsed_cache.rstrip()
+                
+            case 'l':
+                parsed_cache = parsed_cache.lstrip()
+                
+            case _:
+                pass
+        
         return parsed_cache
 
     def handle_requirement(self, source: int, arg: str) -> Literal[0]:
@@ -550,7 +569,7 @@ class Interpreter:
         arguments: list[str] = parts[1:]
 
         args: list[str] = []
-        func = func.rstrip()
+        func = func.strip()
 
         for arg in arguments:
             parsed_arg: str = arg.strip()
@@ -578,7 +597,7 @@ class Interpreter:
                 args.append(parsed_arg[1:-1])
                 continue
 
-            # [*] Last case scenario: maybe it's a cache grab declaration
+            # [*] maybe it's a cache grab declaration
             cgrab: bytes | bool | int | str | char | float = self.handle_cache_grab(parsed_arg)
 
             if cgrab != -69:
@@ -590,6 +609,21 @@ class Interpreter:
         del arguments
 
         match func:
+            case 'ENDL':
+                self.cout('\n')
+                
+            case 'ENDL2':
+                self.cout('\n\n')
+                
+            case 'GETPASS':
+                if len(args) != 1:
+                    self.raise_error(SyntaxError, f"1 argument was expected, but {len(args)} arguments were received")
+                    
+                user_input = getpass(args[0])
+                
+                if user_input:
+                    self.save_to_cache(user_input)
+            
             case 'COUT':
                 self.cout(*args)
 
@@ -600,13 +634,17 @@ class Interpreter:
                 self.echo(*args)
 
             case 'CIN':
-                if len(args) > 1:
-                    self.raise_error(SyntaxError, f"1 or no arguments were expected, but {len(args)} arguments were received")
+                if len(args) > 2:
+                    self.raise_error(SyntaxError, f"2, 1 or no arguments were expected, but {len(args)} arguments were received")
 
                 elif len(args) < 1:
                     args = [0]
 
-                user_input: str | Literal[1] = self.cin(args[0])
+                if len(args) == 2:
+                    user_input: str | Literal[1] = self.cin(args[0], msg=f'{Fore.CYAN}{args[1]}{Fore.RESET}')
+                    
+                else:
+                    user_input: str | Literal[1] = self.cin(args[0])
 
                 if user_input != -1:
                     self._cache.set_cache(user_input)
@@ -619,7 +657,7 @@ class Interpreter:
                     if not isinstance(args[0], int):
                         self.raise_error(TypeError, 'an int was expected to serve as error code for TERMINATE but another datatype was received')
 
-                    print(f"{Fore.RED}Terminated with Error Code #{args[0]}{Style.RESET_ALL}")
+                    print(f"{Fore.RED}Terminated with Error Code #{args[0]}{Style.RESET_ALL}", end='')
                     self.InterpreterRunning = False
 
                 self.InterpreterRunning = False
@@ -685,14 +723,17 @@ class Interpreter:
                 self.full_echo(*args)
                 
             case 'SAFECIN': # [<] cin is mid, use this instead
-                if len(args) != 1:
-                    self.raise_error(SyntaxError, f"1 argument was expected, but {len(args)} arguments were received")
+                if len(args) < 1 or len(args) > 2:
+                    self.raise_error(SyntaxError, f"1 or 2 arguments were expected, but {len(args)} arguments were received")
 
-                user_input: str | Literal[1] = self.cin(args[0])
+                if len(args) == 2:
+                    user_input: str | Literal[1] = self.cin(args[0], msg=f"{Fore.CYAN}{args[1]}{Fore.RESET}")
+                    
+                else:
+                    user_input: str | Literal[1] = self.cin(args[0])
 
                 while user_input == 1:
-                    print(f"{Fore.RED}Please give a correct input.{Fore.RESET}")
-                    user_input = self.cin(args[0])
+                    user_input = self.cin(args[0], msg=f'{Fore.RED}Please give a correct input: {Fore.RESET}')
 
                 if len(user_input) < args[0]:
                     user_input = f'{user_input}{" " * (args[0] - len(user_input))}'[:args[0] + 1]
@@ -706,8 +747,7 @@ class Interpreter:
                 user_input: str | Literal[1] = self.cin(1)
 
                 while user_input not in ('y', 'n'):
-                    print(f"{Fore.RED}Please give a correct input (only 'y' and 'n' are allowed).{Fore.RESET}")
-                    user_input = self.cin(1)
+                    user_input = self.cin(1, msg=f"{Fore.RED}Please give a correct input ('y' or 'n'): {Fore.RESET}")
 
                 self._cache.set_cache(user_input[0])
 
@@ -776,3 +816,120 @@ class Interpreter:
             self._cwd = os.getcwd()
 
         return 0
+
+
+def _local_req_inst(_i: Interpreter, pip: str, npm: str, pkg: str, cx: str, pkg_inst: str, bin_path: str):
+    pip_reqs: list[str] = _i._requirements['pip']
+    npm_reqs: list[str] = _i._requirements['npm']
+    sys_reqs: list[str] = _i._requirements['system']
+    bin_reqs: list[str] = _i._requirements['binary']
+    cx_reqs: list[str] = _i._requirements['cx']
+    
+    for requirement in pip_reqs:
+        subprocess.run([pip, 'install', requirement], text=True, capture_output=False)
+        print('')
+        
+    for requirement in npm_reqs:
+        subprocess.run([npm, 'install', requirement], text=True, capture_output=False)
+        print('')
+        
+    for requirement in sys_reqs:
+        subprocess.run([pkg, pkg_inst, requirement], text=True, capture_output=False)
+        print('')
+        
+    for requirement in cx_reqs:
+        subprocess.run([cx, 'install', requirement], text=True, capture_output=False)
+        print('')
+        
+    for requirement in bin_reqs:
+        print(f'{Fore.BLUE}▻ Fetching data...{Fore.RESET}')
+        
+        try:
+            response: requests.Response = requests.get(requirement, timeout=1.5, allow_redirects=False)
+            
+        except Exception as e:
+            print(f'{Fore.RED}⌦ Could not fetch data.{Fore.RESET} Moving on to the next requirement...')
+            continue
+        
+        else:
+            print(f'{Fore.GREEN}✓ Got a response!{Fore.RESET}')
+        
+        path = os.path.join(bin_path, requirement.split('/')[-1])
+        
+        print(f"{Fore.BLUE}▻ Writing to '{path}'{Fore.RESET}")
+        
+        try:
+            with open(path, 'wb') as f:
+                f.write(response.content)
+                
+        except Exception as e:
+            print(f'{Fore.RED}⌦ Could not finish writing to the path above.{Fore.RESET} Error details: {e}')
+            continue
+        
+        print(f"{Fore.GREEN}✓ Finish writing to '{path}'!\n✓ Installation of {os.path.basename(path)} was successful!{Fore.RESET}\n\n")
+        
+    print(f'{Fore.GREEN}✓ Finished installing all requirements.{Fore.RESET}')
+
+
+def _init_local_interpreter(pkg: str, pip: str, npm: str, cx: str, bin_path: str, pkg_inst: str, cache_size: int):
+    Running = True
+    interpreter = None
+    flag = FlagMarker(lambda: _local_req_inst(interpreter, pip, npm, pkg, cx, pkg_inst, bin_path))
+        
+    while Running:
+        statement: str = input(f'{Fore.BLUE}>> {Fore.RESET}')
+        
+        if statement.strip() == 'TERMINATE;':
+            print(f"{Fore.YELLOW}Goodbye :){Fore.RESET}")
+            Running = False
+        
+        if statement.strip().startswith('TERMINATE') and statement.strip() != "TERMINATE;":
+            print(f"{Fore.CYAN}Note: {Fore.RESET}If you wish to terminate the Interpreter, press {Fore.RED}Ctrl + C{Fore.RESET} or insert {Fore.RED}TERMINATE;{Fore.RESET} with no arguments")
+        
+        interpreter = Interpreter(statement, cache_size, flag, pkg, pip, npm)
+        interpreter.init()
+        
+        print('')
+
+
+def _handle_arguments(args):
+    if args.where:
+        print(f'\n{Fore.MAGENTA}The CX Setup Interpreter can be found at local path: {Fore.LIGHTCYAN_EX}\033[4m{__file__}{Style.RESET_ALL}')
+        os._exit(0)
+        
+    if args.docs:
+        print(f'\n{Fore.MAGENTA}The CX Setup documentation can be found online at: {Fore.LIGHTCYAN_EX}\033[4m{DOCS_URL}{Style.RESET_ALL}')        
+        os._exit(0)
+        
+    _init_local_interpreter(args.pkgmanager, args.pip, args.npm, args.contenterx, args.binpath, args.pkg_install_argument, args.allocate)        
+    
+
+if __name__ == '__main__':
+    # [*] Real-time interpreter hooray
+    parser = ArgumentParser(NAME, description='Interpreter for CX Setup Files and Instructions')
+    
+    print(f"""\n\n{Fore.YELLOW}      ███              █████████  █████ █████        █████████            █████                                    ███     
+ ███ ░███  ███        ███░░░░░███░░███ ░░███        ███░░░░░███          ░░███                                ███ ░███  ███
+░░░█████████░        ███     ░░░  ░░███ ███        ░███    ░░░   ██████  ███████   █████ ████ ████████       ░░░█████████░ 
+  ░░░█████░         ░███           ░░█████         ░░█████████  ███░░███░░░███░   ░░███ ░███ ░░███░░███        ░░░█████░   
+   █████████        ░███            ███░███         ░░░░░░░░███░███████   ░███     ░███ ░███  ░███ ░███         █████████  
+ ███░░███░░███      ░░███     ███  ███ ░░███        ███    ░███░███░░░    ░███ ███ ░███ ░███  ░███ ░███       ███░░███░░███
+░░░  ░███ ░░░        ░░█████████  █████ █████      ░░█████████ ░░██████   ░░█████  ░░████████ ░███████       ░░░  ░███ ░░░ 
+     ░░░              ░░░░░░░░░  ░░░░░ ░░░░░        ░░░░░░░░░   ░░░░░░     ░░░░░    ░░░░░░░░  ░███░░░             ░░░      
+                                                                                              ░███                         
+                                                                                              █████                        
+                                                                                             ░░░░░                         
+                                                                                             
+{Fore.RED}{AUTHOR}{Fore.RESET} * {Fore.GREEN}{LICENSE} License{Fore.RESET} * {Fore.MAGENTA}{YEAR}{Style.RESET_ALL}\n{Fore.YELLOW}{VERSION}{Fore.RESET} * {Fore.BLUE}\033[4m{GITHUB}{Style.RESET_ALL}\n""")
+
+    parser.add_argument("--pkgmanager", "-m", type=str, required=True, help=f"{Fore.GREEN}locate the {Fore.RED}package manager{Fore.GREEN} to use{Fore.RESET} ({Fore.BLUE}str{Fore.RESET})")
+    parser.add_argument("--binpath", "--bp", "-b", type=str, default=os.path.expanduser('~/.local/bin'), help=f"{Fore.GREEN}specify the path to install {Fore.RED}the binaries to{Fore.RESET} ({Fore.BLUE}str{Fore.RESET}, defaults to {Fore.BLUE}~/.local/bin{Fore.RESET})")
+    parser.add_argument("--allocate", "-a", type=int, default=256, help=f"{Fore.GREEN}start a session with X bytes for cache{Fore.RESET} ({Fore.BLUE}int{Fore.RESET}, defaults to {Fore.BLUE}256{Fore.RESET})")
+    parser.add_argument("--contenterx", "--cx", "-c", type=str, default='contenterx', help=f"{Fore.GREEN}locate {Fore.RED}ContenterX/CX{Fore.RESET} ({Fore.BLUE}str{Fore.RESET}, defaults to {Fore.BLUE}globally installed ContenterX{Fore.RESET})")
+    parser.add_argument("--pip", "-p", type=str, default='pip', help=f"{Fore.GREEN}locate {Fore.RED}pip{Fore.RESET} ({Fore.BLUE}str{Fore.RESET}, defaults to {Fore.BLUE}globally installed pip{Fore.RESET})")
+    parser.add_argument("--npm", "-n", type=str, default='npm', help=f"{Fore.GREEN}locate {Fore.RED}npm{Fore.RESET} ({Fore.BLUE}str{Fore.RESET}, defaults to {Fore.BLUE}globally installed npm{Fore.RESET})")
+    parser.add_argument("--pkg-install-argument", "--pkg-inst", type=str, default='install', help=f"{Fore.GREEN}specify the argument to use with the {Fore.RED}package manager to install dependencies{Fore.RESET} ({Fore.BLUE}str{Fore.RESET}, defaults to {Fore.BLUE}install{Fore.RESET})")
+    parser.add_argument("--where", action="store_true", help=f"{Fore.GREEN}locate the interpreter{Fore.RESET} on your device")
+    parser.add_argument("--docs", "--documentation", action="store_true", help=f"visit the {Fore.GREEN}online documentation{Fore.RESET}")
+    
+    _handle_arguments(parser.parse_args())
