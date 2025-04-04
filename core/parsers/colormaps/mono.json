@@ -1,0 +1,10 @@
+{
+    "FUNCTION": "bold white",
+    "SEPARATOR": "dim white",
+    "SEMICOLON": "dim bold italic white",
+    "COMMENT": "dim italic white",
+    "NUMBER": "bold white",
+    "STRING": "bold white",
+    "CACHE_GRAB": "bold italic white",
+    "TEXT": "white"
+}

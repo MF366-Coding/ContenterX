@@ -1,0 +1,14 @@
+COUT ?? "Hello, World";
+ENDL;
+SAFECIN ?? 5 ?? "Say hello: ";
+COUT ?? "Did you say hello? Let's see...";
+FORE ?? "YELLOW";
+ENDL;
+COUT ?? 4.5;
+ENDL;
+COUT ?? "You said: " ?? c0:6e:1:3:b;
+STYLE ?? "RESET";
+ENDL; // COUT ?? "Goodbye, World";
+TERMINATE ?? 4;
+COUT ?? "Nice one!";
+ENDL2;

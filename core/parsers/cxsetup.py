@@ -12,6 +12,7 @@ Thank you!
 from enum import IntEnum
 from argparse import ArgumentParser
 import os
+import sys
 from typing import Any, Literal, NoReturn
 import struct
 import subprocess
@@ -29,6 +30,19 @@ SOURCE_CONVTABLE: list[str] = [
     "system", "cx", "pip", "npm", "binary"
 ]
 
+
+def parse_environment_vars(file: str) -> dict[str, str | float | int]:
+    with open(file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    vars = dict()
+
+    for var in data:
+        if (var.upper() == var) and ('$' not in var) and ('??' not in var) and isinstance(data[var], (int, float, str)):
+            vars[var] = data[var]
+            continue
+
+    return vars
 
 class FlagMarker:
     def __init__(self, on_true, state: bool = False, on_false = None):
@@ -604,6 +618,11 @@ class Interpreter:
                 args.append(cgrab)
                 continue
 
+            # [*] is it a variable?
+            if parsed_arg.startswith("v'") and parsed_arg.endswith("'"):
+                args.append(os.environ.get(parsed_arg[2:-1], parsed_arg[2:-1])) # [i] if the var does not exist, return itself
+                continue
+
             self.raise_error(TypeError, f'argument must be string, char, int or float - {parsed_arg}')
 
         del arguments
@@ -709,7 +728,7 @@ class Interpreter:
                 # [!!] Clears the whole cache!! OMG!!
                 # [i] If any arguments are received, just fuckin' ignore them
                 self._cache.clear()
-                
+
             case 'SET':
                 if len(args) != 1:
                     self.raise_error(SyntaxError, f"1 argument was expected, but {len(args)} arguments were received")
@@ -793,7 +812,7 @@ class Interpreter:
             if not trimmed_line:
                 continue
 
-            if trimmed_line.startswith(('//', '#')):
+            if trimmed_line.startswith('//'):
                 continue
 
             parsed_script += trimmed_line
@@ -875,8 +894,10 @@ def _local_req_inst(_i: Interpreter, pip: str, npm: str, pkg: str, cx: str, pkg_
 def _init_local_interpreter(pkg: str, pip: str, npm: str, cx: str, bin_path: str, pkg_inst: str, cache_size: int):
     Running = True
     interpreter = None
+    reqs = None
+    cache = None
     flag = FlagMarker(lambda: _local_req_inst(interpreter, pip, npm, pkg, cx, pkg_inst, bin_path))
-        
+
     while Running:
         statement: str = input(f'{Fore.BLUE}>> {Fore.RESET}')
         
@@ -888,12 +909,51 @@ def _init_local_interpreter(pkg: str, pip: str, npm: str, cx: str, bin_path: str
             print(f"{Fore.CYAN}Note: {Fore.RESET}If you wish to terminate the Interpreter, press {Fore.RED}Ctrl + C{Fore.RESET} or insert {Fore.RED}TERMINATE;{Fore.RESET} with no arguments")
         
         interpreter = Interpreter(statement, cache_size, flag, pkg, pip, npm)
-        interpreter.init()
-        
-        print('')
+
+        if cache is not None:
+            interpreter._cache = cache # [i] apply existing cache
+
+        if reqs is not None:
+            interpreter._requirements = reqs
+
+        try:
+            interpreter.init()
+
+        except (SyntaxError, TypeError, ValueError) as e:
+            print(f'{Fore.RED}⌦  Your statement is incorrect.{Fore.RESET} Error details: {e}')
+
+        else:
+            cache = interpreter._cache
+            reqs = interpreter._requirements
+
+            print('')
+
+def _init_file_interpreter(file: str, pkg: str, pip: str, npm: str, cx: str, bin_path: str, pkg_inst: str, cache_size: int):
+    flag = FlagMarker(lambda: _local_req_inst(interpreter, pip, npm, pkg, cx, pkg_inst, bin_path))
+
+    try:
+        with open(file, 'r', encoding='utf-8') as f:
+            script = f.read()
+
+    except Exception as e:
+        print(f'{Fore.RED}⌦  Could not load script succesfully.{Fore.RESET} Error details: {e}\n{Fore.BLUE}Goodbye :({Fore.RESET}')
+        sys.exit()
+
+    interpreter = Interpreter(script, cache_size, flag, pkg, pip, npm)
+    interpreter.init()
+
+    print('')
 
 
 def _handle_arguments(args):
+    PRESET_TABLE = {
+        "debian": ['apt', 'install'],
+        "arch": ['pacman', '-S'],
+        "windows": ['winget', 'install'],
+        "cx": ['contenterx', 'install'],
+        "disabled": ["", ""]
+    }
+
     if args.where:
         print(f'\n{Fore.MAGENTA}The CX Setup Interpreter can be found at local path: {Fore.LIGHTCYAN_EX}\033[4m{__file__}{Style.RESET_ALL}')
         os._exit(0)
@@ -901,8 +961,20 @@ def _handle_arguments(args):
     if args.docs:
         print(f'\n{Fore.MAGENTA}The CX Setup documentation can be found online at: {Fore.LIGHTCYAN_EX}\033[4m{DOCS_URL}{Style.RESET_ALL}')        
         os._exit(0)
-        
-    _init_local_interpreter(args.pkgmanager, args.pip, args.npm, args.contenterx, args.binpath, args.pkg_install_argument, args.allocate)        
+
+    if args.preset in ('debian', 'arch', 'windows', 'cx', 'disabled'):
+        if args.file:
+            _init_file_interpreter(args.file, PRESET_TABLE[args.preset][0], args.pip, args.npm, args.contenterx, args.binpath, PRESET_TABLE[args.preset][0], args.allocate)
+
+        else:
+            _init_local_interpreter(PRESET_TABLE[args.preset][0], args.pip, args.npm, args.contenterx, args.binpath, PRESET_TABLE[args.preset][0], args.allocate)
+
+    else:
+        if args.file:
+            _init_file_interpreter(args.file, args.pkgmanager, args.pip, args.npm, args.contenterx, args.binpath, args.pkg_install_argument, args.allocate)
+
+        else:
+            _init_local_interpreter(args.pkgmanager, args.pip, args.npm, args.contenterx, args.binpath, args.pkg_install_argument, args.allocate)
     
 
 if __name__ == '__main__':
@@ -923,14 +995,16 @@ if __name__ == '__main__':
                                                                                              
 {Fore.RED}{AUTHOR}{Fore.RESET} * {Fore.GREEN}{LICENSE} License{Fore.RESET} * {Fore.MAGENTA}{YEAR}{Style.RESET_ALL}\n{Fore.YELLOW}{VERSION}{Fore.RESET} * {Fore.BLUE}\033[4m{GITHUB}{Style.RESET_ALL}\n""")
 
-    parser.add_argument("--pkgmanager", "-m", type=str, required=True, help=f"{Fore.GREEN}locate the {Fore.RED}package manager{Fore.GREEN} to use{Fore.RESET} ({Fore.BLUE}str{Fore.RESET})")
-    parser.add_argument("--binpath", "--bp", "-b", type=str, default=os.path.expanduser('~/.local/bin'), help=f"{Fore.GREEN}specify the path to install {Fore.RED}the binaries to{Fore.RESET} ({Fore.BLUE}str{Fore.RESET}, defaults to {Fore.BLUE}~/.local/bin{Fore.RESET})")
+    parser.add_argument("--file", "-f", type=str, default="", help=f"{Fore.GREEN}specify a file to run{Fore.RESET} instead of simply launching the Interpreter's TUI ({Fore.BLUE}path as str{Fore.RESET}, defaults to {Fore.BLUE}no file (launches the TUI){Fore.RESET})")
+    parser.add_argument("--preset", "-P", type=str, default="none", help=f"{Fore.GREEN}specify a preset to use instead of manually defining arguments for the interpreter{Fore.RESET} ({Fore.BLUE}str{Fore.RESET}, defaults to {Fore.BLUE}none{Fore.RESET})")
+    parser.add_argument("--pkgmanager", "-m", "-k", type=str, default="pacman", help=f"{Fore.GREEN}locate the {Fore.RED}package manager{Fore.GREEN} to use{Fore.RESET} ({Fore.BLUE}str{Fore.RESET}, defaults to {Fore.BLUE}pacman{Fore.RESET})")
+    parser.add_argument("--binpath", "--bp", "-b", type=str, default=os.path.expanduser('~/.local/bin/'), help=f"{Fore.GREEN}specify the path to install {Fore.RED}the binaries to{Fore.RESET} ({Fore.BLUE}str{Fore.RESET}, defaults to {Fore.BLUE}{os.path.expanduser('~/.local/bin/')}{Fore.RESET})")
     parser.add_argument("--allocate", "-a", type=int, default=256, help=f"{Fore.GREEN}start a session with X bytes for cache{Fore.RESET} ({Fore.BLUE}int{Fore.RESET}, defaults to {Fore.BLUE}256{Fore.RESET})")
     parser.add_argument("--contenterx", "--cx", "-c", type=str, default='contenterx', help=f"{Fore.GREEN}locate {Fore.RED}ContenterX/CX{Fore.RESET} ({Fore.BLUE}str{Fore.RESET}, defaults to {Fore.BLUE}globally installed ContenterX{Fore.RESET})")
     parser.add_argument("--pip", "-p", type=str, default='pip', help=f"{Fore.GREEN}locate {Fore.RED}pip{Fore.RESET} ({Fore.BLUE}str{Fore.RESET}, defaults to {Fore.BLUE}globally installed pip{Fore.RESET})")
     parser.add_argument("--npm", "-n", type=str, default='npm', help=f"{Fore.GREEN}locate {Fore.RED}npm{Fore.RESET} ({Fore.BLUE}str{Fore.RESET}, defaults to {Fore.BLUE}globally installed npm{Fore.RESET})")
-    parser.add_argument("--pkg-install-argument", "--pkg-inst", type=str, default='install', help=f"{Fore.GREEN}specify the argument to use with the {Fore.RED}package manager to install dependencies{Fore.RESET} ({Fore.BLUE}str{Fore.RESET}, defaults to {Fore.BLUE}install{Fore.RESET})")
-    parser.add_argument("--where", action="store_true", help=f"{Fore.GREEN}locate the interpreter{Fore.RESET} on your device")
-    parser.add_argument("--docs", "--documentation", action="store_true", help=f"visit the {Fore.GREEN}online documentation{Fore.RESET}")
+    parser.add_argument("--pkg-install-argument", "--pkg-inst", "-I", type=str, default='-S', help=f"{Fore.GREEN}specify the argument to use with the {Fore.RED}package manager to install dependencies{Fore.RESET} ({Fore.BLUE}str{Fore.RESET}, defaults to {Fore.BLUE}-S{Fore.RESET})")
+    parser.add_argument("--where", "-W", action="store_true", help=f"{Fore.GREEN}locate the interpreter{Fore.RESET} on your device")
+    parser.add_argument("--docs", "-D", "--documentation", action="store_true", help=f"visit the {Fore.GREEN}online documentation{Fore.RESET}")
     
     _handle_arguments(parser.parse_args())
