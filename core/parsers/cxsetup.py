@@ -276,10 +276,10 @@ class Cache:
 
             case DataType.CHAR:
                 try:
-                    parsed_char = str(cached_bytes[0], 'utf-8')
+                    parsed_char = str(cached_bytes, 'utf-8')
 
                 except UnicodeError:
-                    parsed_char = str(int.from_bytes(cached_bytes[0], byteorder='big'))
+                    parsed_char = str(int.from_bytes(cached_bytes, byteorder='big'))
 
                 return char.FromString(parsed_char)
 
@@ -588,18 +588,15 @@ class Interpreter:
         for arg in arguments:
             parsed_arg: str = arg.strip()
 
+            if re.match(r'[0-9]+\.[0-9]+', parsed_arg) or re.match('[0-9]+[e][0-9]+', parsed_arg):
+                # [i] data type: float
+                args.append(float(parsed_arg))
+                continue
+
             if re.match('[0-9]+', parsed_arg):
                 # [i] data type: integer
                 args.append(int(parsed_arg))
                 continue
-
-            if parsed_arg.count('.') == 1:
-                # [i] data type: float
-                int_part, float_part = parsed_arg.split('.')
-
-                if re.match('[0-9]+', int_part) and re.match('[0-9]+', float_part):
-                    args.append(float(parsed_arg))
-                    continue
 
             if parsed_arg.startswith('"') and parsed_arg.endswith('"') and parsed_arg.count('"') == 2:
                 # [i] data type: string or char
@@ -919,7 +916,7 @@ def _init_local_interpreter(pkg: str, pip: str, npm: str, cx: str, bin_path: str
         try:
             interpreter.init()
 
-        except (SyntaxError, TypeError, ValueError) as e:
+        except (SyntaxError, TypeError, ValueError, struct.error) as e:
             print(f'{Fore.RED}⌦  Your statement is incorrect.{Fore.RESET} Error details: {e}')
 
         else:

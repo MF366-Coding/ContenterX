@@ -64,7 +64,7 @@ def syntax_highlight(code: str, colormap: dict[str, str] | None = None):
                 continue
 
             # [*] Floats
-            if re.fullmatch(r'[0-9]+\.[0-9]+', token):
+            if re.fullmatch(r'[0-9]+\.[0-9]+', token) or re.fullmatch('[0-9]+[e][0-9]+', token):
                 text.append(token, colormap['NUMBER'])
                 semicolon = False
                 continue
