@@ -5,6 +5,12 @@ from colorama import Fore
 
 # [*] Patterns
 CACHE_GRAB_PATTERN = re.compile("c[0-9]+:[0-9]+[el]:[0-9]+:[0-9]+:[rlbn]")
+INTEGER_PATTERN = re.compile("[0-9]+")
+FLOAT_PATTERN = re.compile(r"[0-9]+\.[0-9]+")
+
+
+RECOGNIZED_KEYWORDS = {'!INVERT', '!ENDL', '!ENDL2', '!GETPASS', '!COUT', '!ECHO', '!CIN', '!TERMINATE', '!REQUIRES', '!REQINSTALL', '!STYLE', '!FORE', '!BACK', '!CLEAR', '!SET', '!ECHORDIE', '!SAFECIN', '!YAYORNAY', '!PKGRUN', '!RUN', '!PIPRUN', '!NPMRUN',
+                       'INVERT', 'ENDL', 'ENDL2', 'GETPASS', 'COUT', 'ECHO', 'CIN', 'TERMINATE', 'REQUIRES', 'REQINSTALL', 'STYLE', 'FORE', 'BACK', 'CLEAR', 'SET', 'ECHORDIE', 'SAFECIN', 'YAYORNAY', 'PKGRUN', 'RUN', 'PIPRUN', 'NPMRUN'}
 
 
 @dataclass
@@ -37,7 +43,7 @@ class Issue:
 
 class ErrorCheckers:
     @staticmethod
-    def e001_semicolon(line: str, lineno: int):
+    def e001_semicolon(line: str, lineno: int) -> Issue | None:
         """
         E001 - Missing semicolon at the end of the line
         -----------------------
@@ -51,10 +57,41 @@ class ErrorCheckers:
         ```
         """
 
-        if lineno == 0:
+        if lineno == 0 and re.fullmatch(INTEGER_PATTERN, line):
             return
 
-        # TODO
+        if not line.endswith(';'):
+            return Issue(lineno + 1, -1, "E001", "Missing semicolon at the end of the line", 3, Fore.RED)
+
+        return
+
+    @staticmethod
+    def e002_unknown_keyword(statement: str, lineno: int, statement_no: int) -> Issue | None:
+        """
+        E002 - Unknown Keyword
+        -----------------------
+        ### Example
+        ```cxsetup
+        FOOBAR ?? "Hello!";
+        ```
+
+        ### Explanation
+        - `FOOBAR` is not a recognized keyword
+        """
+
+        if lineno == 0 and re.fullmatch(INTEGER_PATTERN, statement):
+            return
+
+        if statement.split('??', maxsplit=1)[0].strip().endswith(';'):
+            if statement.split('??', masplit=1)[0][:-1].strip() not in RECOGNIZED_KEYWORDS:
+                return Issue(lineno, statement_no, "E002", f"Unknown Keyword {statement.split('??', masplit=1)[0][:-1].strip()}", 3, Fore.RED)
+
+            return
+
+        if statement.split('??', masplit=1)[0].strip() not in RECOGNIZED_KEYWORDS:
+            return Issue(lineno, statement_no, "E002", f"Unknown Keyword {statement.split('??', masplit=1)[0].strip()}", 3, Fore.RED)
+
+        return
 
 
 class Linter:
