@@ -11,24 +11,31 @@ from argparse import ArgumentParser
 VERSION = 'v1.0.0'
 DEFAULT_COLORMAP = {
     "FUNCTION": "bold red",
+    "NEGATION": "bold magenta",
     "SEPARATOR": "dim yellow",
     "SEMICOLON": "dim bold italic red",
     "COMMENT": "dim italic white",
     "NUMBER": "bold blue",
     "STRING": "green",
     "CACHE_GRAB": "bold cyan",
-    "TEXT": "white"
+    "TEXT": "white",
+    "UNREACHABLE_CODE": "dim italic white"
 }
 
 
-def syntax_highlight(code: str, colormap: dict[str, str] | None = None):
+def syntax_highlight(code: str, colormap: dict[str, str] | None = None, ignore_unreachable_code: bool = True):
     colormap = DEFAULT_COLORMAP if colormap is None else colormap
     lines = code.splitlines()
     text = Text()
+    terminated = [False, False]
+    comment = False
 
     for line in lines:
+        if ignore_unreachable_code:
+            terminated = [False, False]
+
         if line.strip().startswith(('#', '//')):
-            text.append(line, colormap['COMMENT'])
+            text.append(f'{line}\n', colormap['COMMENT'])
             continue
 
         tokens = re.split(r'(\s+|".*?"|[?:;]|[\?]{2}|c[0-9]+:[0-9]+[el]:[0-9]+:[0-9]+:[rlbn])', line)
@@ -36,8 +43,16 @@ def syntax_highlight(code: str, colormap: dict[str, str] | None = None):
         comment = False
 
         for token in tokens:
+            if ignore_unreachable_code:
+                terminated = [False, False]
+
+            if sum(terminated) == 2:
+                text.append(token, colormap['UNREACHABLE_CODE'])
+                continue
+
             if not token.strip():
                 text.append(token, colormap['TEXT'])
+                continue
 
             token = token.strip()
 
@@ -45,10 +60,24 @@ def syntax_highlight(code: str, colormap: dict[str, str] | None = None):
                 text.append(token, colormap['COMMENT'])
                 continue
 
+            # [*] Negations
+            if token in {'!INVERT', '!ENDL', '!ENDL2', '!GETPASS', '!COUT', '!ECHO', '!CIN', '!TERMINATE', '!REQUIRES', '!REQINSTALL', '!STYLE', '!FORE', '!BACK', '!CLEAR', '!SET', '!ECHORDIE', '!SAFECIN', '!YAYORNAY', '!PKGRUN', '!RUN', '!PIPRUN', '!NPMRUN'}:
+                text.append(token, colormap['NEGATION'])
+                semicolon = False
+
+                if token == "!TERMINATE":
+                    terminated[1] = True
+
+                continue
+
             # [*] Keywords/Functions
-            if token in {'ENDL', 'ENDL2', 'GETPASS', 'COUT', 'ECHO', 'CIN', 'TERMINATE', 'REQUIRES', 'REQINSTALL', 'STYLE', 'FORE', 'BACK', 'CLEAR', 'SET', 'ECHORDIE', 'SAFECIN', 'YAYORNAY', 'PKGRUN', 'RUN', 'PIPRUN', 'NPMRUN'}:
+            if token in {'INVERT', 'ENDL', 'ENDL2', 'GETPASS', 'COUT', 'ECHO', 'CIN', 'TERMINATE', 'REQUIRES', 'REQINSTALL', 'STYLE', 'FORE', 'BACK', 'CLEAR', 'SET', 'ECHORDIE', 'SAFECIN', 'YAYORNAY', 'PKGRUN', 'RUN', 'PIPRUN', 'NPMRUN'}:
                 text.append(token, colormap['FUNCTION'])
                 semicolon = False
+
+                if token == "TERMINATE":
+                    terminated[0] = True
+
                 continue
 
             # [*] Strings
@@ -149,7 +178,7 @@ def _handle_arguments(args):
         os._exit(0)
 
     console = Console()
-    text = syntax_highlight(code, colormap)
+    text = syntax_highlight(code, colormap, not args.highlight_unreachable)
     console.print(text)
     return 0
 
@@ -173,6 +202,7 @@ if __name__ == '__main__':
 
     parser.add_argument("file", type=str, help=f"{Fore.GREEN}specify a file to perform syntax highlighting on{Fore.RESET} ({Fore.BLUE}path as str{Fore.RESET})")
     parser.add_argument("--colormap", "-c", type=str, default="", help=f"{Fore.GREEN}specify a colormap to use instead of the default one{Fore.RESET} ({Fore.BLUE}path as str{Fore.RESET}, defaults to {Fore.BLUE}none{Fore.RESET})")
+    parser.add_argument("--highlight-unreachable", "-u", action='store_true', default=False, help=f"{Fore.GREEN}apply syntax highlighting to unreachable code{Fore.RESET} (defaults to {Fore.BLUE}NO{Fore.RESET})")
     parser.add_argument("--where", "-W", action="store_true", help=f"{Fore.GREEN}locate the highlighter{Fore.RESET} on your device")
     parser.add_argument("--docs", "-D", "--documentation", action="store_true", help=f"visit the {Fore.GREEN}online documentation for CX Setup{Fore.RESET}")
 

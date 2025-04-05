@@ -31,19 +31,6 @@ SOURCE_CONVTABLE: list[str] = [
 ]
 
 
-def parse_environment_vars(file: str) -> dict[str, str | float | int]:
-    with open(file, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-
-    vars = dict()
-
-    for var in data:
-        if (var.upper() == var) and ('$' not in var) and ('??' not in var) and isinstance(data[var], (int, float, str)):
-            vars[var] = data[var]
-            continue
-
-    return vars
-
 class FlagMarker:
     def __init__(self, on_true, state: bool = False, on_false = None):
         self._state = state
@@ -198,8 +185,12 @@ class DataType(IntEnum):
 
 class Cache:
     def __init__(self, reserved_bytes: int) -> None:
-        self.cache = bytearray(reserved_bytes)
         self._RESERVED: int = reserved_bytes
+
+        if self.reserved_bytes < 1:
+            self._RESERVED = 1
+
+        self.cache = bytearray(reserved_bytes)
         self._pointer = 0
 
     def clear(self) -> None:
@@ -299,6 +290,10 @@ class Cache:
                 raise TypeError('type is not valid')
 
     def _advance_pointer(self):
+        if self._RESERVED == 1:
+            self._pointer = 1
+            return
+
         if self._pointer >= (self._RESERVED - 1):
             self._pointer = 0
 
@@ -395,6 +390,7 @@ class RequirementSource(IntEnum):
 class Interpreter:
     def __init__(self, script: str, cache_bytes: int, flag_marker: FlagMarker, pkg_command: str, pip_path: str = 'pip', npm_path: str = 'npm') -> None:
         self._cache: Cache = Cache(cache_bytes)
+        self._specialized_cache: Cache = Cache(1)
         self._flag_marker: FlagMarker = flag_marker
         self._pippath: str = pip_path
         self._npmpath: str = npm_path
@@ -410,6 +406,7 @@ class Interpreter:
             "npm": [],
             "binary": []
         }
+        self._specialized_cache.set_cache(True)
 
     def cout(self, *data: str) -> Literal[0]:
         print(*data, sep='', end='')
@@ -516,7 +513,7 @@ class Interpreter:
                 if not second_arg:
                     second_arg = -1
 
-                elif second_arg > self._cache.reserved_bytes:
+                elif second_arg > self._cache.reserved_bytes + 1:
                     self.raise_error(CacheOverflow, "the given end value exceeds the amount of bytes reserved for the cache")
 
             case _:
@@ -570,7 +567,18 @@ class Interpreter:
         return 0
 
     def run(self, command: str, *arguments: str, capture_output: bool = False, text: bool = True) -> subprocess.CompletedProcess[Any] | None:
-        result: subprocess.CompletedProcess[Any] = subprocess.run([command, *arguments], capture_output=capture_output, text=text)
+        args = []
+
+        for arg in arguments:
+            if not isinstance(arg, (str, char)):
+                self.raise_error(TypeError, f"one of the arguments is not of type string or char, as expected, but rather {str(type(arg)).split(chr(39))[1]}")
+
+            args.append(str(arg))
+
+        if not isinstance(command, (str, char)):
+            self.raise_error(TypeError, f"the given command is not of type string or char, as expected, but rather {str(type(arg)).split(chr(39))[1]}")
+
+        result: subprocess.CompletedProcess[Any] = subprocess.run([str(command), *args], capture_output=capture_output, text=text)
         return result
 
     def save_to_cache(self, value: str | int | float) -> Literal[0]:
@@ -580,10 +588,23 @@ class Interpreter:
     def handle_statement(self, statement: str):
         parts: list[str] = statement.split('??')
         func: str = parts[0]
+        negation_char = parts[0][0]
+
+        if negation_char == '!':
+            is_positive = 0
+            func = parts[0][1:]
+
+        else:
+            is_positive = 1
+
+        is_globally_positive = self._specialized_cache.cache[0]
         arguments: list[str] = parts[1:]
 
         args: list[str] = []
         func = func.strip()
+
+        if (is_globally_positive + is_positive) == 1:
+            return # [i] the necessary conditions are not met
 
         for arg in arguments:
             parsed_arg: str = arg.strip()
@@ -626,15 +647,28 @@ class Interpreter:
 
         match func:
             case 'ENDL':
+                if args:
+                    self.raise_error(SyntaxError, f"no arguments were expected, but {len(args)} argument(s) were received")
+
                 self.cout('\n')
                 
             case 'ENDL2':
+                if args:
+                    self.raise_error(SyntaxError, f"no arguments were expected, but {len(args)} argument(s) were received")
+
                 self.cout('\n\n')
                 
             case 'GETPASS':
                 if len(args) != 1:
                     self.raise_error(SyntaxError, f"1 argument was expected, but {len(args)} arguments were received")
-                    
+
+                if not isinstance(args[0], str):
+                    if isinstance(args[0], char):
+                        args = [str(args[0])]
+
+                    else:
+                        self.raise_error(TypeError, f"a prompt of type string or char was expected, but received {str(type(args[0])).split(chr(39))[1]} instead")
+
                 user_input = getpass(args[0])
                 
                 if user_input:
@@ -647,6 +681,14 @@ class Interpreter:
                 if len(args) != 2:
                     self.raise_error(SyntaxError, f"2 arguments were expected, but {len(args)} arguments were received")
 
+                if not isinstance(args[0], (str, char)):
+                    self.raise_error(TypeError, f"ECHO was expecting data to write in the form of a string or a char, but received {str(type(args[0])).split(chr(39))[1]} instead")
+
+                if not isinstance(args[1], (str, char)):
+                    self.raise_error(TypeError, f"ECHO was expecting a filepath to write to in the form of a string or a char, but received {str(type(args[1])).split(chr(39))[1]} instead")
+
+                args = [str(args[0]), str(args[1])]
+
                 self.echo(*args)
 
             case 'CIN':
@@ -657,9 +699,18 @@ class Interpreter:
                     args = [0]
 
                 if len(args) == 2:
-                    user_input: str | Literal[1] = self.cin(args[0], msg=f'{Fore.CYAN}{args[1]}{Fore.RESET}')
+                    if not isinstance(args[0], int):
+                        self.raise_error(TypeError, f"a prompt length of type int was expected, but one of type {str(type(args[0])).split(chr(39))[1]} was received instead")
+
+                    if not isinstance(args[1], (str, char)):
+                        self.raise_error(TypeError, f"a prompt of type string or char was expected, but one of type {str(type(args[1])).split(chr(39))[1]} was received instead")
+
+                    user_input: str | Literal[1] = self.cin(args[0], msg=f'{Fore.CYAN}{str(args[1])}{Fore.RESET}')
                     
                 else:
+                    if not isinstance(args[0], int):
+                        self.raise_error(TypeError, f"a prompt length of type int was expected, but one of type {str(type(args[0])).split(chr(39))[1]} was received instead")
+
                     user_input: str | Literal[1] = self.cin(args[0])
 
                 if user_input != -1:
@@ -673,14 +724,21 @@ class Interpreter:
                     if not isinstance(args[0], int):
                         self.raise_error(TypeError, 'an int was expected to serve as error code for TERMINATE but another datatype was received')
 
-                    print(f"{Fore.RED}Terminated with Error Code #{args[0]}{Style.RESET_ALL}", end='')
-                    self.InterpreterRunning = False
+                    if args[0] > 0:
+                        print(f"{Fore.RED}Terminated with Error Code #{args[0]}{Style.RESET_ALL}", end='')
+                        self.InterpreterRunning = False
 
                 self.InterpreterRunning = False
 
             case 'REQUIRES':
                 if len(args) != 2:
                     self.raise_error(SyntaxError, f"2 arguments were expected, but {len(args)} arguments were received")
+
+                if not isinstance(args[0], int):
+                        self.raise_error(TypeError, f"a source of type int was expected, but one of type {str(type(args[0])).split(chr(39))[1]} was received instead")
+
+                if not isinstance(args[1], (str, char)):
+                    self.raise_error(TypeError, f"a requirement of type string or char was expected, but one of type {str(type(args[1])).split(chr(39))[1]} was received instead")
 
                 self.handle_requirement(args[0], str(args[1]))
 
@@ -695,7 +753,7 @@ class Interpreter:
                     self.raise_error(SyntaxError, f"1 argument was expected, but {len(args)} arguments were received")
 
                 if args[0] not in ("BRIGHT", "DIM", "NORMAL", "RESET_ALL", "RESET"):
-                    self.raise_error(ValueError, "the style argument must be one of the 5 - BRIGHT, DIM, NORMAL, RESET, RESET_ALL")
+                    self.raise_error(ValueError, "the style argument must be one of the following 5 strings - BRIGHT, DIM, NORMAL, RESET, RESET_ALL")
 
                 self.cout(eval(f"Style.{'RESET_ALL' if args[0] == 'RESET' else args[0]}", globals()))
                 
@@ -706,7 +764,7 @@ class Interpreter:
                 allowed_args: tuple[str] = ("RESET", 'BLACK', 'BLUE', 'YELLOW', 'RED', 'GREEN', 'MAGENTA', 'CYAN', 'WHITE', *[f"LIGHT{i}_EX" for i in ('BLACK', 'BLUE', 'YELLOW', 'RED', 'GREEN', 'MAGENTA', 'CYAN', 'WHITE')])
                 
                 if args[0] not in allowed_args:
-                    self.raise_error(ValueError, f"the foreground argument must be one of the following - {allowed_args}")
+                    self.raise_error(ValueError, f"the foreground argument must be one of the following strings - {allowed_args}")
 
                 self.cout(eval(f"Fore.{args[0]}", globals()))
                 
@@ -717,25 +775,33 @@ class Interpreter:
                 allowed_args: tuple[str] = ("RESET", 'BLACK', 'BLUE', 'YELLOW', 'RED', 'GREEN', 'MAGENTA', 'CYAN', 'WHITE', *[f"LIGHT{i}_EX" for i in ('BLACK', 'BLUE', 'YELLOW', 'RED', 'GREEN', 'MAGENTA', 'CYAN', 'WHITE')])
                 
                 if args[0] not in allowed_args:
-                    self.raise_error(ValueError, f"the background argument must be one of the following - {allowed_args}")
+                    self.raise_error(ValueError, f"the background argument must be one of the following strings - {allowed_args}")
 
                 self.cout(eval(f"Back.{args[0]}", globals()))
                 
             case 'CLEAR':
-                # [!!] Clears the whole cache!! OMG!!
-                # [i] If any arguments are received, just fuckin' ignore them
+                if args:
+                    self.raise_error(SyntaxError, f"no arguments were expected, but {len(args)} argument(s) were given")
+
                 self._cache.clear()
 
             case 'SET':
                 if len(args) != 1:
                     self.raise_error(SyntaxError, f"1 argument was expected, but {len(args)} arguments were received")
-                    
+
+                # [i] Any data type is allowed, 'cuz we cachin' it
                 self.save_to_cache(args[0])
                 
             case 'ECHORDIE': # [<] literally stands for Echo Or Die!!
                 if len(args) != 2:
                     self.raise_error(SyntaxError, f"2 arguments were expected, but {len(args)} arguments were received")
-    
+
+                if not isinstance(args[0], (str, char)):
+                    self.raise_error(TypeError, f"ECHORDIE was expecting data to write in the form of a string or a char, but received {str(type(args[0])).split(chr(39))[1]} instead")
+
+                if not isinstance(args[1], (str, char)):
+                    self.raise_error(TypeError, f"ECHORDIE was expecting a filepath to write to in the form of a string or a char, but received {str(type(args[1])).split(chr(39))[1]} instead")
+
                 self.full_echo(*args)
                 
             case 'SAFECIN': # [<] cin is mid, use this instead
@@ -743,9 +809,18 @@ class Interpreter:
                     self.raise_error(SyntaxError, f"1 or 2 arguments were expected, but {len(args)} arguments were received")
 
                 if len(args) == 2:
-                    user_input: str | Literal[1] = self.cin(args[0], msg=f"{Fore.CYAN}{args[1]}{Fore.RESET}")
+                    if not isinstance(args[0], int):
+                        self.raise_error(TypeError, f"a prompt length of type int was expected, but one of type {str(type(args[0])).split(chr(39))[1]} was received instead")
+
+                    if not isinstance(args[1], (str, char)):
+                        self.raise_error(TypeError, f"a prompt of type string or char was expected, but one of type {str(type(args[1])).split(chr(39))[1]} was received instead")
+
+                    user_input: str | Literal[1] = self.cin(args[0], msg=f"{Fore.CYAN}{str(args[1])}{Fore.RESET}")
                     
                 else:
+                    if not isinstance(args[0], int):
+                        self.raise_error(TypeError, f"a prompt length of type int was expected, but one of type {str(type(args[0])).split(chr(39))[1]} was received instead")
+
                     user_input: str | Literal[1] = self.cin(args[0])
 
                 while user_input == 1:
@@ -765,7 +840,7 @@ class Interpreter:
                 while user_input not in ('y', 'n'):
                     user_input = self.cin(1, msg=f"{Fore.RED}Please give a correct input ('y' or 'n'): {Fore.RESET}")
 
-                self._cache.set_cache(user_input[0])
+                self._specialized_cache.cache[0] = 0 if user_input[0] == 'n' else 1
 
             case 'RUN':
                 if not args:
@@ -794,6 +869,13 @@ class Interpreter:
                     self.raise_error(SyntaxError, '1 or more arguments were expected, but none were received')
 
                 self.run(self._npmpath, *args)
+
+            case 'INVERT':
+                if args:
+                    self.raise_error(SyntaxError, f'no arguments were expected, but {len(args)} arguments were received')
+
+                bool_val = self._specialized_cache.cache[0]
+                self._specialized_cache.cache[0] = 0 if bool_val == 1 else 1
 
     def install_requirements(self) -> Literal[0]:
         self._flag_marker.toggle() # [i] this will trigger ContenterX requirement installation
@@ -893,16 +975,18 @@ def _init_local_interpreter(pkg: str, pip: str, npm: str, cx: str, bin_path: str
     interpreter = None
     reqs = None
     cache = None
+    special = None
     flag = FlagMarker(lambda: _local_req_inst(interpreter, pip, npm, pkg, cx, pkg_inst, bin_path))
+    termination = "TERMINATE;"
 
     while Running:
         statement: str = input(f'{Fore.BLUE}>> {Fore.RESET}')
         
-        if statement.strip() == 'TERMINATE;':
+        if statement.strip() == termination:
             print(f"{Fore.YELLOW}Goodbye :){Fore.RESET}")
             Running = False
         
-        if statement.strip().startswith('TERMINATE') and statement.strip() != "TERMINATE;":
+        if statement.strip().startswith('TERMINATE') and statement.strip() != termination:
             print(f"{Fore.CYAN}Note: {Fore.RESET}If you wish to terminate the Interpreter, press {Fore.RED}Ctrl + C{Fore.RESET} or insert {Fore.RED}TERMINATE;{Fore.RESET} with no arguments")
         
         interpreter = Interpreter(statement, cache_size, flag, pkg, pip, npm)
@@ -910,36 +994,59 @@ def _init_local_interpreter(pkg: str, pip: str, npm: str, cx: str, bin_path: str
         if cache is not None:
             interpreter._cache = cache # [i] apply existing cache
 
+        if special is not None:
+            interpreter._specialized_cache = special
+
         if reqs is not None:
             interpreter._requirements = reqs
 
         try:
             interpreter.init()
 
-        except (SyntaxError, TypeError, ValueError, struct.error) as e:
+        except (SyntaxError, TypeError, ValueError, struct.error, CacheOverflow) as e:
             print(f'{Fore.RED}⌦  Your statement is incorrect.{Fore.RESET} Error details: {e}')
 
         else:
             cache = interpreter._cache
             reqs = interpreter._requirements
-
+            special = interpreter._specialized_cache
             print('')
+            termination = f"{'!' if special.cache[0] == 0 else ''}TERMINATE;"
 
-def _init_file_interpreter(file: str, pkg: str, pip: str, npm: str, cx: str, bin_path: str, pkg_inst: str, cache_size: int):
+def _init_file_interpreter(file: str, pkg: str, pip: str, npm: str, cx: str, bin_path: str, pkg_inst: str, cache_size: tuple[int, int]):
     flag = FlagMarker(lambda: _local_req_inst(interpreter, pip, npm, pkg, cx, pkg_inst, bin_path))
 
     try:
         with open(file, 'r', encoding='utf-8') as f:
-            script = f.read()
+            script = '\n'.join(f.read().split('\n')[1:]) if cache_size[1] else f.read()
 
     except Exception as e:
         print(f'{Fore.RED}⌦  Could not load script succesfully.{Fore.RESET} Error details: {e}\n{Fore.BLUE}Goodbye :({Fore.RESET}')
         sys.exit()
 
-    interpreter = Interpreter(script, cache_size, flag, pkg, pip, npm)
+    interpreter = Interpreter(script, cache_size[0], flag, pkg, pip, npm)
     interpreter.init()
 
     print('')
+
+
+def _get_cache_size_declaration(file: str) -> tuple[int, int]:
+    try:
+        with open(file, 'r', encoding='utf-8') as f:
+            data: str = f.read()
+
+    except Exception as e:
+        print(f'{Fore.RED}⌦  Could not load script succesfully.{Fore.RESET} Error details: {e}\n{Fore.BLUE}Goodbye :({Fore.RESET}')
+        sys.exit()
+
+    if not data:
+        print(f'{Fore.RED}⌦  Script is empty.{Fore.RESET}\n{Fore.BLUE}Goodbye :({Fore.RESET}')
+        sys.exit()
+
+    if re.match("[0-9]+", data.split('\n', maxsplit=1)[0]):
+        return (int(data.split('\n', maxsplit=1)[0]), 1)
+
+    return (256, 0)
 
 
 def _handle_arguments(args):
@@ -961,14 +1068,14 @@ def _handle_arguments(args):
 
     if args.preset in ('debian', 'arch', 'windows', 'cx', 'disabled'):
         if args.file:
-            _init_file_interpreter(args.file, PRESET_TABLE[args.preset][0], args.pip, args.npm, args.contenterx, args.binpath, PRESET_TABLE[args.preset][0], args.allocate)
+            _init_file_interpreter(args.file, PRESET_TABLE[args.preset][0], args.pip, args.npm, args.contenterx, args.binpath, PRESET_TABLE[args.preset][0], _get_cache_size_declaration(args.file))
 
         else:
             _init_local_interpreter(PRESET_TABLE[args.preset][0], args.pip, args.npm, args.contenterx, args.binpath, PRESET_TABLE[args.preset][0], args.allocate)
 
     else:
         if args.file:
-            _init_file_interpreter(args.file, args.pkgmanager, args.pip, args.npm, args.contenterx, args.binpath, args.pkg_install_argument, args.allocate)
+            _init_file_interpreter(args.file, args.pkgmanager, args.pip, args.npm, args.contenterx, args.binpath, args.pkg_install_argument, _get_cache_size_declaration(args.file))
 
         else:
             _init_local_interpreter(args.pkgmanager, args.pip, args.npm, args.contenterx, args.binpath, args.pkg_install_argument, args.allocate)

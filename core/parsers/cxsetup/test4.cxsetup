@@ -1,0 +1,8 @@
+60
+// INVERT; // uncomment this if you want to try invert instead of yayornay
+YAYORNAY;
+!COUT ?? "Hello World";
+COUT ?? "Goodbye World!";
+!TERMINATE ?? 1;
+TERMINATE ?? 0;
+

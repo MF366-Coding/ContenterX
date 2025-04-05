@@ -1,0 +1,12 @@
+{
+    "FUNCTION": "bold #fc6c85",
+    "NEGATION": "bold italic #ff4b4b",
+    "SEPARATOR": "dim #b8c0d4",
+    "SEMICOLON": "italic #ffaa00",
+    "COMMENT": "dim italic #8a91a8",
+    "NUMBER": "bold #72e0d1",
+    "STRING": "#aad94c",
+    "CACHE_GRAB": "bold #38bdf8",
+    "TEXT": "#e5e9f0",
+    "UNREACHABLE_CODE": "dim italic #545c6a"
+}

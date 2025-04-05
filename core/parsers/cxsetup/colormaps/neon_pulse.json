@@ -1,0 +1,12 @@
+{
+    "FUNCTION": "bold bright_magenta",
+    "NEGATION": "bold bright_blue",
+    "SEPARATOR": "bold cyan",
+    "SEMICOLON": "dim bright_magenta italic",
+    "COMMENT": "dim italic bright_black",
+    "NUMBER": "bold bright_cyan",
+    "STRING": "bold bright_white",
+    "CACHE_GRAB": "bold reverse bright_blue",
+    "TEXT": "bright_white",
+    "UNREACHABLE_CODE": "dim italic bright_black"
+}
