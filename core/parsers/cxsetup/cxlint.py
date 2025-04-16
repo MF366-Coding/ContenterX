@@ -43,7 +43,7 @@ class Issue:
 
 class ErrorCheckers:
     @staticmethod
-    def e001_semicolon(line: str, lineno: int) -> Issue | None:
+    def e001_semicolon(line: str, lineno: int, ignore_list: list[str]) -> Issue | None:
         """
         E001 - Missing semicolon at the end of the line
         -----------------------
@@ -57,6 +57,9 @@ class ErrorCheckers:
         ```
         """
 
+        if "E001" in ignore_list:
+            return # [i] pretend nothing happened
+
         if lineno == 0 and re.fullmatch(INTEGER_PATTERN, line):
             return
 
@@ -66,7 +69,7 @@ class ErrorCheckers:
         return
 
     @staticmethod
-    def e002_unknown_keyword(statement: str, lineno: int, statement_no: int) -> Issue | None:
+    def e002_unknown_keyword(statement: str, lineno: int, statement_no: int, ignore_list: list[str]) -> Issue | None:
         """
         E002 - Unknown Keyword
         -----------------------
@@ -78,6 +81,9 @@ class ErrorCheckers:
         ### Explanation
         - `FOOBAR` is not a recognized keyword
         """
+
+        if "E002" in ignore_list:
+            return
 
         if lineno == 0 and re.fullmatch(INTEGER_PATTERN, statement):
             return
@@ -92,6 +98,13 @@ class ErrorCheckers:
             return Issue(lineno, statement_no, "E002", f"Unknown Keyword {statement.split('??', masplit=1)[0].strip()}", 3, Fore.RED)
 
         return
+
+    @staticmethod
+    def e003_arguments(statement: str, lineno: int, statement_no: int, ignore_list: list[str]):
+        if "E003" in ignore_list:
+            return
+
+        parts = statement.split('??')
 
 
 class Linter:
