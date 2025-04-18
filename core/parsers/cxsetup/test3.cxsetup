@@ -1,6 +1,0 @@
-60
-!COUT ?? "HELLO, WORLD";
-// Made by MF366
-COUT ?? "GOODBYE, WORLD";
-TERMINATE ?? 0;
-!TERMINATE ?? 1;
