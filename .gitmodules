@@ -1,0 +1,6 @@
+[submodule "core/parsers/cxsetup"]
+	path = core/parsers/cxsetup
+	url = git@github.com:MF366-Coding/CXSetup.git
+[submodule "core/parsers/mfroad"]
+	path = core/parsers/mfroad
+	url = git@github.com:MF366-Coding/MFRoad.git
