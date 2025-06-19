@@ -1,4 +1,4 @@
-certifi==2025.4.26
+certifi==2025.6.15
 charset-normalizer==3.4.1
 colorama==0.4.6
 distro==1.9.0
