@@ -4,5 +4,5 @@ colorama==0.4.6
 distro==1.9.0
 idna==3.11
 lupa==2.5
-requests==2.32.4
+requests==2.32.5
 urllib3==2.5.0
